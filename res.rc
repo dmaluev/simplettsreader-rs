@@ -1,0 +1,36 @@
+#include "version.h"
+
+app-icon ICON "icons/app-icon.ico"
+
+1 VERSIONINFO
+ FILEVERSION VERSION_MAJOR,VERSION_MINOR,0,VERSION_PATCH
+ PRODUCTVERSION VERSION_MAJOR,VERSION_MINOR,0,VERSION_PATCH
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS 0x1L
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "Dmitry Maluev"
+            VALUE "FileDescription", VERSION_DESCRIPTION
+            VALUE "FileVersion", VERSION_FULL
+            VALUE "InternalName", VERSION_NAME
+            VALUE "LegalCopyright", "Copyright (C) 2025 Dmitry Maluev"
+            VALUE "OriginalFilename", "simplettsreader.exe"
+            VALUE "ProductName", VERSION_NAME
+            VALUE "ProductVersion", VERSION_FULL
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

@@ -1,0 +1,147 @@
+import { Palette, GridBox, HorizontalBox, VerticalBox, Button, CheckBox, LineEdit, Slider, StandardListView } from "std-widgets.slint";
+
+export component AboutWindow inherits Window {
+    width: 300px;
+    height: 180px;
+    icon: @image-url("../icons/app-icon.ico");
+    title <=> app-name;
+    in property <string> app-name;
+    in property <string> app-version;
+    in-out property <bool> hidden;
+    callback hidden-cb-toggled <=> hidden-cb.toggled;
+    VerticalBox {
+        HorizontalLayout {
+            Image {
+                width: 48px;
+                height: 48px;
+                source: @image-url("../icons/app-icon.ico");
+            }
+
+            VerticalBox {
+                padding-top: 0px;
+                HorizontalLayout {
+                    alignment: start;
+                    Text {
+                        font-weight: 800;
+                        text <=> app-name;
+                    }
+
+                    Text {
+                        text <=> app-version;
+                    }
+                }
+
+                Text {
+                    text: "Copyright (C) 2008-2025 Dmitry Maluev";
+                }
+            }
+        }
+
+        Text {
+            vertical-stretch: 1;
+            text: "Simple TTS Reader is a small clipboard reader based on Microsoft Speech API.\nJust Ctrl+C the text you want to read aloud.\nUse --hidden argument to start in tray-only mode.";
+            wrap: word-wrap;
+        }
+
+        hidden-cb := CheckBox {
+            checked <=> hidden;
+            text: "Launch hidden";
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    width: 560px;
+    height: 340px;
+    background: Palette.alternate-background;
+    icon: @image-url("../icons/app-icon.ico");
+    title <=> app-name;
+    in property <string> app-name;
+    in property <[StandardListViewItem]> voices-list-model;
+    in-out property <float> rate: 0;
+    in-out property <float> volume: 100;
+    out property <string> test-string: "This is a test string.";
+    callback voices-list-current-item-changed <=> voices-list.current-item-changed;
+    callback rate-slider-released <=> rate-slider.released;
+    callback volume-slider-released <=> volume-slider.released;
+    callback about-button-clicked <=> about-button.clicked;
+    callback test-button-clicked <=> test-button.clicked;
+    public function voices-list-set-current-item(index: int) {
+        voices-list.set-current-item(index);
+    }
+    VerticalBox {
+        Rectangle {
+            background: Palette.control-background;
+            border-color: Palette.border;
+            border-width: 1px;
+            voices-list := StandardListView {
+                model <=> voices-list-model;
+            }
+        }
+
+        GridBox {
+            spacing-vertical: 24px;
+            Row {
+                Text {
+                    width: 20%;
+                    text: "Rate:";
+                }
+
+                rate-slider := Slider {
+                    value <=> rate;
+                    minimum: -10;
+                    maximum: 10;
+                    changed(value) => {
+                        if (round(value) == 0) {
+                            self.value = 0; // Fix -0
+                        } else {
+                            self.value = round(value);
+                        }
+                    }
+                }
+
+                Text {
+                    width: 4%;
+                    horizontal-alignment: center;
+                    text: "\{round(rate-slider.value)}";
+                }
+            }
+
+            Row {
+                Text {
+                    width: 20%;
+                    text: "Volume:";
+                }
+
+                volume-slider := Slider {
+                    value <=> volume;
+                    changed(value) => {
+                        self.value = round(value);
+                    }
+                }
+
+                Text {
+                    width: 4%;
+                    horizontal-alignment: center;
+                    text: "\{round(volume-slider.value)}";
+                }
+            }
+        }
+
+        HorizontalBox {
+            about-button := Button {
+                width: 18%;
+                text: "About";
+            }
+
+            test-button := Button {
+                width: 18%;
+                text: "Test";
+            }
+
+            LineEdit {
+                text <=> test-string;
+            }
+        }
+    }
+}

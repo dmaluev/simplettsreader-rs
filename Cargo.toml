@@ -1,0 +1,26 @@
+[package]
+name = "simplettsreader"
+version = "2.0.0"
+authors = ["Dmitry Maluev <dmaluev@gmail.com>"]
+edition = "2024"
+description = "Simple TTS Reader is a small clipboard reader"
+
+[profile.release]
+lto = true
+strip = true
+
+[dependencies]
+arboard = "3.5.0"
+clipboard-master = "3.1.3"
+confy = "0.6.1"
+parking_lot = "0.12.3"
+pico-args = "0.5.0"
+sapi-lite = "0.1.1"
+serde = { version = "1.0.219", features = ["derive"] }
+single-instance = "0.3.3"
+slint = { version = "1.11.0", features = ["image-default-formats", "renderer-skia"] }
+tray-icon = "0.20.1"
+
+[build-dependencies]
+embed-resource = "3.0.2"
+slint-build = "1.11.0"
