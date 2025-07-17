@@ -3,9 +3,10 @@
 !define PRODUCT_NAME		"Simple TTS Reader"
 !define PRODUCT_NAME_SETUP	"SimpleTTSReader"
 !define PRODUCT_GUID		"{85CBCC28-E397-4fcd-802E-100BE5F064A2}"
-!define PRODUCT_PUBLISHER	"OpenSource"
+!define PRODUCT_PUBLISHER	"Dmitry Maluev"
 !define PRODUCT_WEB_SITE	"https://simplettsreader.sourceforge.io/"
 !define PRODUCT_MAIN_EXE	"simplettsreader.exe"
+!define PRODUCT_MAIN_DIR    "${PRODUCT_NAME}"
 
 !define RK_SOFT_MS_WIN_CV	"SOFTWARE\Microsoft\Windows\CurrentVersion"
 !define RK_APP_PATHS		"${RK_SOFT_MS_WIN_CV}\App Paths\${PRODUCT_MAIN_EXE}"
@@ -31,7 +32,7 @@
 
 Name					"${PRODUCT_NAME} ${PRODUCT_VERSION}"
 OutFile					"${PRODUCT_NAME_SETUP}-${PRODUCT_VERSION}-setup.exe"
-InstallDir				"$PROGRAMFILES64\${PRODUCT_PUBLISHER}\${PRODUCT_NAME}"
+InstallDir				"$PROGRAMFILES64\${PRODUCT_MAIN_DIR}"
 InstallDirRegKey		HKLM "${RK_APP_PATHS}" ""
 ShowInstDetails			show
 ShowUnInstDetails		show
@@ -45,16 +46,25 @@ Section "MainSection" SEC01
 	SetCompress			auto
 
 	File "simplettsreader.exe"
-	File "${SOURCE_DIR}\License.txt"
+	File "${SOURCE_DIR}\License.html"
+	File "${SOURCE_DIR}\License (Slint).html"
 
-	CreateDirectory	"$SMPROGRAMS\${PRODUCT_PUBLISHER}\${PRODUCT_NAME}"
-	CreateShortCut	"$SMPROGRAMS\${PRODUCT_PUBLISHER}\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk"	"$INSTDIR\${PRODUCT_MAIN_EXE}"
-	CreateShortCut	"$SMPROGRAMS\${PRODUCT_PUBLISHER}\${PRODUCT_NAME}\License.lnk"			"$INSTDIR\License.txt"
-	CreateShortCut	"$DESKTOP\${PRODUCT_NAME}.lnk"											"$INSTDIR\${PRODUCT_MAIN_EXE}"
+	CreateDirectory	"$SMPROGRAMS\${PRODUCT_MAIN_DIR}"
+	CreateShortCut	"$SMPROGRAMS\${PRODUCT_MAIN_DIR}\${PRODUCT_NAME}.lnk"	"$INSTDIR\${PRODUCT_MAIN_EXE}"
+	CreateShortCut	"$SMPROGRAMS\${PRODUCT_MAIN_DIR}\License.lnk"			"$INSTDIR\License.html"
+	CreateShortCut	"$SMPROGRAMS\${PRODUCT_MAIN_DIR}\License (Slint).lnk"	"$INSTDIR\License (Slint).html"
+	CreateShortCut	"$DESKTOP\${PRODUCT_NAME}.lnk"							"$INSTDIR\${PRODUCT_MAIN_EXE}"
+SectionEnd
+
+Section "Visual Studio Runtime"
+	SetOutPath "$INSTDIR"
+	File "VC_redist.x64.exe"
+	ExecWait '"$INSTDIR\VC_redist.x64.exe" /quiet'
+	Delete "$INSTDIR\VC_redist.x64.exe"
 SectionEnd
 
 Section -AdditionalIcons
-	CreateShortCut "$SMPROGRAMS\${PRODUCT_PUBLISHER}\${PRODUCT_NAME}\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
+	CreateShortCut "$SMPROGRAMS\${PRODUCT_MAIN_DIR}\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
 SectionEnd
 
 Section -Post
@@ -72,15 +82,17 @@ Section Uninstall
 	SetShellVarContext all
 
 	Delete "$INSTDIR\simplettsreader.exe"
-	Delete "$INSTDIR\License.txt"
+	Delete "$INSTDIR\License.html"
+	Delete "$INSTDIR\License (Slint).html"
 
 	Delete "$INSTDIR\uninst.exe"
 	Delete "$INSTDIR\Uninstall.exe"
 
-	Delete	"$SMPROGRAMS\${PRODUCT_PUBLISHER}\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk"
-	Delete	"$SMPROGRAMS\${PRODUCT_PUBLISHER}\${PRODUCT_NAME}\License.lnk"
-	Delete	"$SMPROGRAMS\${PRODUCT_PUBLISHER}\${PRODUCT_NAME}\Uninstall.lnk"
-	RMDir	"$SMPROGRAMS\${PRODUCT_PUBLISHER}\${PRODUCT_NAME}"
+	Delete	"$SMPROGRAMS\${PRODUCT_MAIN_DIR}\${PRODUCT_NAME}.lnk"
+	Delete	"$SMPROGRAMS\${PRODUCT_MAIN_DIR}\License.lnk"
+	Delete	"$SMPROGRAMS\${PRODUCT_MAIN_DIR}\License (Slint).lnk"
+	Delete	"$SMPROGRAMS\${PRODUCT_MAIN_DIR}\Uninstall.lnk"
+	RMDir	"$SMPROGRAMS\${PRODUCT_MAIN_DIR}"
 	Delete	"$DESKTOP\${PRODUCT_NAME}.lnk"
 
 	RMDir "$INSTDIR"
