@@ -8,19 +8,10 @@ fn main() {
     }
 
     let mut pargs = pico_args::Arguments::from_env();
-    let hidden: Option<bool>;
-    if let Ok(value) = pargs.opt_value_from_str("--hidden") {
-        if let Some(value) = value {
-            hidden = Some(value);
-        } else {
-            hidden = None;
-        }
-    } else {
-        hidden = Some(true);
-    }
+    let hidden = pargs.opt_value_from_str("--hidden").unwrap_or(Some(true));
 
     if let Err(e) = simplettsreader::run(hidden) {
-        eprintln!("{}", e);
+        eprintln!("{e}");
         std::process::exit(1);
     }
 }

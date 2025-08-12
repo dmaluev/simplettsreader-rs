@@ -11,63 +11,50 @@ use std::sync::{Arc, Weak};
 const APP_NAME: &str = "Simple TTS Reader";
 
 fn get_dictionary_path() -> Option<PathBuf> {
-    if let Ok(mut path) = confy::get_configuration_file_path(APP_NAME, "dictionary") {
-        path.set_extension("txt");
-        Some(path)
-    } else {
-        None
-    }
+    let mut path = confy::get_configuration_file_path(APP_NAME, "dictionary").ok()?;
+    path.set_extension("txt");
+    Some(path)
 }
 
 fn get_recordings_path() -> Option<PathBuf> {
-    if let Ok(mut path) = confy::get_configuration_file_path(APP_NAME, "recordings") {
-        path.pop();
-        path.pop();
-        path.push("recordings");
-        std::fs::create_dir(&path).ok();
-        Some(path)
-    } else {
-        None
-    }
+    let mut path = confy::get_configuration_file_path(APP_NAME, "recordings").ok()?;
+    path.pop();
+    path.pop();
+    path.push("recordings");
+    let _ = std::fs::create_dir(&path);
+    Some(path)
 }
 
 fn get_recording_file_path(ext: &str, index: Option<u32>) -> Option<PathBuf> {
-    if let Some(mut path) = get_recordings_path() {
-        let local_datetime = chrono::Local::now();
-        let mut timestamp = local_datetime.format("%Y%m%d_%H%M%S").to_string();
-        if let Some(index) = index {
-            timestamp.push_str(&format!("({index})"));
-        }
-        path.push(timestamp);
-        path.set_extension(ext);
-        Some(path)
-    } else {
-        None
+    let mut path = get_recordings_path()?;
+    let local_datetime = chrono::Local::now();
+    let mut timestamp = local_datetime.format("%Y%m%d_%H%M%S").to_string();
+    if let Some(index) = index {
+        timestamp.push_str(&format!("({index})"));
     }
+    path.push(timestamp);
+    path.set_extension(ext);
+    Some(path)
 }
 
 fn get_valid_recording_file_path(ext: &str) -> Option<PathBuf> {
-    if let Some(path) = get_recording_file_path(ext, None) {
-        // Try without index:
-        if std::fs::exists(&path).unwrap() {
-            // Find suitable index:
-            let mut index: u32 = 0;
-            loop {
-                if let Some(path) = get_recording_file_path(ext, Some(index)) {
-                    if !std::fs::exists(&path).unwrap() {
-                        return Some(path);
-                    }
-                }
-                index += 1;
-                if index == 100 {
-                    return None; // Too many indices.
-                }
+    let path = get_recording_file_path(ext, None)?;
+    // Try without index:
+    if std::fs::exists(&path).ok()? {
+        // Find suitable index:
+        let mut index: u32 = 0;
+        loop {
+            let path = get_recording_file_path(ext, Some(index))?;
+            if !std::fs::exists(&path).ok()? {
+                return Some(path);
             }
-        } else {
-            Some(path)
+            index += 1;
+            if index == 100 {
+                return None; // Too many indices.
+            }
         }
     } else {
-        None
+        Some(path)
     }
 }
 
@@ -102,7 +89,7 @@ impl Config {
     }
 
     fn store(&self) {
-        confy::store(APP_NAME, "config", self).ok();
+        let _ = confy::store(APP_NAME, "config", self);
     }
 }
 
@@ -136,7 +123,7 @@ impl Dictionary {
             let separator: char;
             if let Some(last_char) = token.chars().last() {
                 if is_separator(last_char) {
-                    old_word = (&token[0..token.len() - 1]).to_lowercase();
+                    old_word = token[0..token.len() - 1].to_lowercase();
                     separator = last_char;
                 } else {
                     old_word = token.to_lowercase();
@@ -159,21 +146,26 @@ impl Dictionary {
         Some(result)
     }
 
-    fn load(&mut self, path: &Path) {
+    fn load(&mut self, path: &Path) -> std::io::Result<()> {
         self.word_map.clear();
-        if let Ok(contents) = std::fs::read_to_string(path) {
-            for line in contents.lines() {
-                if let Some(kv) = line.split_once('=') {
-                    self.word_map.insert(String::from(kv.0), String::from(kv.1));
-                }
+        let contents = std::fs::read_to_string(path)?;
+        for line in contents.lines() {
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+
+            if let Some((key, value)) = line.split_once('=') {
+                self.word_map
+                    .insert(key.trim().to_string(), value.trim().to_string());
             }
         }
+        Ok(())
     }
 
     fn save(&self, path: &Path) -> std::io::Result<()> {
         let mut file = std::fs::File::create(path)?;
-        for (key, value) in self.word_map.iter() {
-            writeln!(&mut file, "{key}={value}")?;
+        for (key, value) in &self.word_map {
+            writeln!(file, "{key}={value}")?;
         }
         Ok(())
     }
@@ -312,7 +304,7 @@ impl SpeechApp {
         // TODO: Find a better way to stop active speech
         self.synth = sapi_lite::tts::EventfulSynthesizer::new(SapiEventHandler {
             weak_speech_app: if self.weak_speech_app.is_some() {
-                Some(self.weak_speech_app.as_ref().unwrap().clone())
+                Some(Weak::clone(self.weak_speech_app.as_ref().unwrap()))
             } else {
                 None
             },
@@ -348,8 +340,9 @@ impl SpeechApp {
 
         let stream = windows::Win32::System::Com::IStream::from(self.memory_stream.try_clone()?);
 
-        let mut data: Vec<u8> = vec![];
-        let mut chunk = [0 as u8; 4096];
+        let mut data: Vec<u8> = Vec::with_capacity(0x1000);
+        let mut samples: Vec<i16> = Vec::with_capacity(0x8000);
+        let mut chunk = [0u8; 0x1000];
         let mut cbread: u32 = 0;
         loop {
             unsafe {
@@ -360,14 +353,23 @@ impl SpeechApp {
             if cbread == 0 {
                 break;
             }
-            data.extend(&chunk[0..cbread as usize]);
+
+            data.extend_from_slice(&chunk[..cbread as usize]);
+            let mut drain_count = 0;
+            for sample in data
+                .chunks_exact(2)
+                .map(|x| i16::from_le_bytes(x.try_into().unwrap()))
+            {
+                samples.push(sample);
+                drain_count += 2;
+            }
+            data.drain(0..drain_count);
         }
-        let samples = unsafe { data.align_to::<i16>().1 };
 
         unsafe {
             stream.SetSize(0)?;
         }
-        if data.is_empty() {
+        if samples.is_empty() {
             return Ok(());
         }
 
@@ -381,7 +383,7 @@ impl SpeechApp {
                         sample_format: hound::SampleFormat::Int,
                     };
                     let mut wav_writer = hound::WavWriter::create(path, wav_spec)?;
-                    for sample in samples.iter() {
+                    for sample in &samples {
                         wav_writer.write_sample(*sample)?;
                     }
                     wav_writer.finalize()?;
@@ -399,7 +401,7 @@ impl SpeechApp {
                 if let Some(path) = get_valid_recording_file_path("ogg") {
                     if let Ok(mut file) = std::fs::File::create(path) {
                         let mut encoder = vorbis_encoder::Encoder::new(1, 16000, 0.2).unwrap();
-                        let encoded = encoder.encode(&samples.to_vec()).unwrap();
+                        let encoded = encoder.encode(&samples).unwrap();
                         file.write_all(&encoded)?;
                         let encoded = encoder.flush().unwrap();
                         file.write_all(&encoded)?;
@@ -436,7 +438,7 @@ impl ClipboardListener {
                 weak_speech_app,
             };
 
-            clipboard_master::Master::new(listener).run().ok();
+            let _ = clipboard_master::Master::new(listener).run();
         });
     }
 }
@@ -445,7 +447,7 @@ impl clipboard_master::ClipboardHandler for ClipboardListener {
     fn on_clipboard_change(&mut self) -> clipboard_master::CallbackResult {
         if let Ok(text) = self.clipboard.get_text() {
             if let Some(speech_app) = Weak::upgrade(&self.weak_speech_app) {
-                speech_app.lock().speak(&text).ok();
+                let _ = speech_app.lock().speak(&text);
             }
         }
         clipboard_master::CallbackResult::Next
@@ -462,9 +464,7 @@ pub fn run(hidden: Option<bool>) -> Result<(), Box<dyn Error>> {
         let original_config = Config::load(false);
         config = Config::load(true);
 
-        if let Some(hidden) = hidden {
-            config.hidden = hidden;
-        }
+        config.hidden = hidden.unwrap_or(config.hidden);
 
         if config != original_config {
             config.store();
@@ -475,7 +475,7 @@ pub fn run(hidden: Option<bool>) -> Result<(), Box<dyn Error>> {
         word_map: HashMap::new(),
     };
     if let Some(path) = get_dictionary_path() {
-        dictionary.load(&path);
+        let _ = dictionary.load(&path);
     }
 
     let speech_app = Arc::new(Mutex::new(SpeechApp::build(config, dictionary)?));
@@ -483,13 +483,13 @@ pub fn run(hidden: Option<bool>) -> Result<(), Box<dyn Error>> {
 
     ClipboardListener::spawn(Arc::downgrade(&speech_app));
 
-    let app_window = AppWindow::new()?;
-    app_window.set_app_name(slint::SharedString::from(APP_NAME));
+    let main_window = MainWindow::new()?;
+    main_window.set_app_name(slint::SharedString::from(APP_NAME));
 
     let _tray_icon;
     {
-        let weak_app_window = app_window.as_weak();
-        let icon = tray_icon::Icon::from_resource_name("app-icon", None)?;
+        let weak_main_window = main_window.as_weak();
+        let icon = tray_icon::Icon::from_resource_name("app_icon", None)?;
         _tray_icon = tray_icon::TrayIconBuilder::new()
             .with_tooltip(APP_NAME)
             .with_icon(icon)
@@ -502,12 +502,12 @@ pub fn run(hidden: Option<bool>) -> Result<(), Box<dyn Error>> {
                 ..
             } = event
             {
-                weak_app_window
-                    .upgrade_in_event_loop(move |app_window| {
-                        if app_window.window().is_visible() {
-                            app_window.hide().unwrap();
+                weak_main_window
+                    .upgrade_in_event_loop(move |main_window| {
+                        if main_window.window().is_visible() {
+                            main_window.hide().unwrap();
                         } else {
-                            app_window.show().unwrap();
+                            main_window.show().unwrap();
                         }
                     })
                     .unwrap();
@@ -523,44 +523,44 @@ pub fn run(hidden: Option<bool>) -> Result<(), Box<dyn Error>> {
             .map(|voice| slint::StandardListViewItem::from(get_voice_name(voice).as_str()))
             .collect();
         let model = slint::ModelRc::new(slint::VecModel::<slint::StandardListViewItem>::from(v));
-        app_window.set_voices_list_model(model);
+        main_window.set_voices_list_model(model);
 
         let index = speech_app.lock().get_voice_index(None).unwrap_or(0);
-        app_window.invoke_voices_list_set_current_item(index as i32);
+        main_window.invoke_voices_list_set_current_item(index as i32);
     }
 
-    app_window.set_rate(speech_app.lock().config.rate as f32);
-    app_window.set_volume(speech_app.lock().config.volume as f32);
-    app_window.set_output_cb_current_index(speech_app.lock().config.output as i32);
+    main_window.set_rate(speech_app.lock().config.rate as f32);
+    main_window.set_volume(speech_app.lock().config.volume as f32);
+    main_window.set_output_cb_current_index(speech_app.lock().config.output as i32);
 
-    app_window.window().on_close_requested(|| {
+    main_window.window().on_close_requested(|| {
         slint::quit_event_loop().unwrap();
         slint::CloseRequestResponse::HideWindow
     });
 
-    app_window.on_voices_list_current_item_changed({
-        let speech_app = speech_app.clone();
+    main_window.on_voices_list_current_item_changed({
+        let speech_app = Arc::clone(&speech_app);
         move |index: i32| {
             let name = speech_app.lock().get_voice_name_by_index(index as usize);
             speech_app.lock().set_voice(Some(&name)).unwrap();
         }
     });
-    app_window.on_rate_slider_released({
-        let speech_app = speech_app.clone();
+    main_window.on_rate_slider_released({
+        let speech_app = Arc::clone(&speech_app);
         move |position: f32| {
             let rate = position.round() as i32;
             speech_app.lock().set_rate(Some(rate)).unwrap();
         }
     });
-    app_window.on_volume_slider_released({
-        let speech_app = speech_app.clone();
+    main_window.on_volume_slider_released({
+        let speech_app = Arc::clone(&speech_app);
         move |position: f32| {
             let volume = position.round() as u32;
             speech_app.lock().set_volume(Some(volume)).unwrap();
         }
     });
-    app_window.on_about_button_clicked({
-        let speech_app = speech_app.clone();
+    main_window.on_about_button_clicked({
+        let speech_app = Arc::clone(&speech_app);
         move || {
             let version = format!(" v{}", env!("CARGO_PKG_VERSION"));
             let about_window = AboutWindow::new().unwrap();
@@ -570,7 +570,7 @@ pub fn run(hidden: Option<bool>) -> Result<(), Box<dyn Error>> {
 
             about_window.on_hidden_cb_toggled({
                 let weak_about_window = about_window.as_weak();
-                let speech_app = speech_app.clone();
+                let speech_app = Arc::clone(&speech_app);
                 move || {
                     let about_window = weak_about_window.unwrap();
                     speech_app.lock().config.hidden = about_window.get_hidden();
@@ -581,19 +581,19 @@ pub fn run(hidden: Option<bool>) -> Result<(), Box<dyn Error>> {
             about_window.show().unwrap();
         }
     });
-    app_window.on_test_button_clicked({
-        let weak_app_window = app_window.as_weak();
-        let speech_app = speech_app.clone();
+    main_window.on_test_button_clicked({
+        let weak_main_window = main_window.as_weak();
+        let speech_app = Arc::clone(&speech_app);
         move || {
-            let app_window = weak_app_window.unwrap();
+            let main_window = weak_main_window.unwrap();
             speech_app
                 .lock()
-                .speak(&app_window.get_test_string())
+                .speak(&main_window.get_test_string())
                 .unwrap();
         }
     });
-    app_window.on_dict_button_clicked({
-        let speech_app = speech_app.clone();
+    main_window.on_dict_button_clicked({
+        let speech_app = Arc::clone(&speech_app);
         move || {
             let dictionary_window = DictionaryWindow::new().unwrap();
 
@@ -601,34 +601,30 @@ pub fn run(hidden: Option<bool>) -> Result<(), Box<dyn Error>> {
 
             dictionary_window.on_add_button_clicked({
                 let weak_dictionary_window = dictionary_window.as_weak();
-                let speech_app = speech_app.clone();
+                let speech_app = Arc::clone(&speech_app);
                 move || {
                     let dictionary_window = weak_dictionary_window.unwrap();
 
-                    let old_word: String = String::from(
-                        dictionary_window
-                            .get_old_word_string()
-                            .trim()
-                            .to_lowercase(),
-                    )
-                    .chars()
-                    .filter(|c| c.is_alphanumeric())
-                    .collect();
-                    let new_word: String = String::from(
-                        dictionary_window
-                            .get_new_word_string()
-                            .trim()
-                            .to_lowercase(),
-                    )
-                    .chars()
-                    .filter(|c| c.is_alphanumeric())
-                    .collect();
+                    let old_word: String = dictionary_window
+                        .get_old_word_string()
+                        .trim()
+                        .to_lowercase()
+                        .chars()
+                        .filter(|c| c.is_alphanumeric())
+                        .collect();
+                    let new_word: String = dictionary_window
+                        .get_new_word_string()
+                        .trim()
+                        .to_lowercase()
+                        .chars()
+                        .filter(|c| c.is_alphanumeric())
+                        .collect();
                     if !old_word.is_empty() && !new_word.is_empty() {
                         speech_app
                             .lock()
                             .dictionary
                             .word_map
-                            .insert(String::from(old_word), String::from(new_word));
+                            .insert(old_word, new_word);
 
                         if let Some(path) = get_dictionary_path() {
                             let _ = speech_app.lock().dictionary.save(&path);
@@ -640,7 +636,7 @@ pub fn run(hidden: Option<bool>) -> Result<(), Box<dyn Error>> {
             });
             dictionary_window.on_delete_button_clicked({
                 let weak_dictionary_window = dictionary_window.as_weak();
-                let speech_app = speech_app.clone();
+                let speech_app = Arc::clone(&speech_app);
                 move || {
                     let dictionary_window = weak_dictionary_window.unwrap();
 
@@ -662,12 +658,12 @@ pub fn run(hidden: Option<bool>) -> Result<(), Box<dyn Error>> {
             dictionary_window.show().unwrap();
         }
     });
-    app_window.on_output_cb_selected({
-        let weak_app_window = app_window.as_weak();
-        let speech_app = speech_app.clone();
+    main_window.on_output_cb_selected({
+        let weak_main_window = main_window.as_weak();
+        let speech_app = Arc::clone(&speech_app);
         move |_value: slint::SharedString| {
-            let app_window = weak_app_window.unwrap();
-            let index = app_window.get_output_cb_current_index();
+            let main_window = weak_main_window.unwrap();
+            let index = main_window.get_output_cb_current_index();
             match index {
                 0 => speech_app.lock().set_output(OutputKind::Speak),
                 1 => speech_app.lock().set_output(OutputKind::SaveWAV),
@@ -677,27 +673,28 @@ pub fn run(hidden: Option<bool>) -> Result<(), Box<dyn Error>> {
             }
         }
     });
-    app_window.on_output_button_clicked({
+    main_window.on_output_button_clicked({
         move || {
             if let Some(path) = get_recordings_path() {
-                std::process::Command::new("explorer")
+                let _ = std::process::Command::new("explorer")
                     .arg(path)
                     .spawn()
-                    .unwrap();
+                    .unwrap()
+                    .wait();
             }
         }
     });
-    app_window.on_link_ta_clicked({
+    main_window.on_link_ta_clicked({
         move || {
             open::that("https://simplettsreader.sourceforge.io/").unwrap();
         }
     });
 
     if !speech_app.lock().config.hidden {
-        app_window.show()?;
+        main_window.show()?;
     }
     slint::run_event_loop_until_quit()?;
-    app_window.hide()?;
+    main_window.hide()?;
 
     Ok(())
 }

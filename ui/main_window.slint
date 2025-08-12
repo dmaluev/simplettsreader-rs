@@ -1,119 +1,21 @@
-import { Palette, GridBox, HorizontalBox, VerticalBox, Button, CheckBox, ComboBox, LineEdit, Slider, StandardListView, AboutSlint } from "std-widgets.slint";
+import { Palette, GridBox, HorizontalBox, VerticalBox, Button, ComboBox, LineEdit, Slider, StandardListView } from "std-widgets.slint";
+import { AboutWindow } from "about_window.slint";
+import { DictionaryWindow } from "dictionary_window.slint";
 
-export component AboutWindow inherits Window {
-    width: 300px;
-    height: 300px;
-    icon: @image-url("../icons/app-icon.ico");
-    title <=> app-name;
-    in property <string> app-name;
-    in property <string> app-version;
-    in-out property <bool> hidden;
-    callback hidden-cb-toggled <=> hidden-cb.toggled;
-    VerticalBox {
-        HorizontalLayout {
-            Image {
-                width: 48px;
-                height: 48px;
-                source: @image-url("../icons/app-icon.ico");
-            }
+export { AboutWindow, DictionaryWindow }
 
-            VerticalBox {
-                padding-top: 0px;
-                HorizontalLayout {
-                    alignment: start;
-                    Text {
-                        font-weight: 800;
-                        text <=> app-name;
-                    }
-
-                    Text {
-                        text <=> app-version;
-                    }
-                }
-
-                Text {
-                    text: "Copyright © 2008-2025 Dmitry Maluev";
-                }
-            }
-        }
-
-        Text {
-            text: "Simple TTS Reader is a small clipboard reader based on Microsoft Speech API.\nMake a selection and press Ctrl+C to copy the text you want to read aloud.\nUse --hidden argument to start in tray-only mode.";
-            wrap: word-wrap;
-        }
-
-        hidden-cb := CheckBox {
-            checked <=> hidden;
-            text: "Launch hidden";
-        }
-
-        AboutSlint { }
-    }
-}
-
-export component DictionaryWindow inherits Window {
-    width: 360px;
-    height: 580px;
-    background: Palette.alternate-background;
-    icon: @image-url("../icons/app-icon.ico");
-    title: "Dictionary";
-    in property <[StandardListViewItem]> word-list-model;
-    out property <string> old-word-string;
-    out property <string> new-word-string;
-    callback add-button-clicked <=> add-button.clicked;
-    callback delete-button-clicked <=> delete-button.clicked;
-    public function word-list-get-current-item() -> string {
-        if word-list.current-item >= 0 && word-list.current-item < word-list.model.length {
-            return word-list.model[word-list.current-item].text;
-        } else {
-            return "";
-        }
-    }
-    VerticalBox {
-        LineEdit {
-            placeholder-text: "Old word";
-            text <=> old-word-string;
-        }
-
-        LineEdit {
-            placeholder-text: "New word";
-            text <=> new-word-string;
-        }
-
-        HorizontalBox {
-            padding: 0px;
-            add-button := Button {
-                text: "Add";
-            }
-
-            delete-button := Button {
-                text: "Delete";
-            }
-        }
-
-        Rectangle {
-            background: Palette.control-background;
-            border-color: Palette.border;
-            border-width: 1px;
-            word-list := StandardListView {
-                model <=> word-list-model;
-            }
-        }
-    }
-}
-
-export component AppWindow inherits Window {
+export component MainWindow inherits Window {
     width: 580px;
     height: 360px;
     background: Palette.alternate-background;
-    icon: @image-url("../icons/app-icon.ico");
+    icon: @image-url("../assets/app_icon.ico");
     title <=> app-name;
     in property <string> app-name;
     in property <[StandardListViewItem]> voices-list-model;
+    out property <string> test-string: "This is a test string.";
     in-out property <float> rate: 0;
     in-out property <float> volume: 100;
     in-out property <int> output-cb-current-index <=> output-cb.current-index;
-    out property <string> test-string: "This is a test string.";
     callback voices-list-current-item-changed <=> voices-list.current-item-changed;
     callback rate-slider-released <=> rate-slider.released;
     callback volume-slider-released <=> volume-slider.released;

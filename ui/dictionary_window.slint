@@ -1,0 +1,52 @@
+import { Palette, HorizontalBox, VerticalBox, Button, LineEdit, StandardListView } from "std-widgets.slint";
+
+export component DictionaryWindow inherits Window {
+    width: 360px;
+    height: 580px;
+    background: Palette.alternate-background;
+    icon: @image-url("../assets/app_icon.ico");
+    title: "Dictionary";
+    in property <[StandardListViewItem]> word-list-model;
+    out property <string> old-word-string;
+    out property <string> new-word-string;
+    callback add-button-clicked <=> add-button.clicked;
+    callback delete-button-clicked <=> delete-button.clicked;
+    public pure function word-list-get-current-item() -> string {
+        if word-list.current-item >= 0 && word-list.current-item < word-list.model.length {
+            return word-list.model[word-list.current-item].text;
+        } else {
+            return "";
+        }
+    }
+    VerticalBox {
+        LineEdit {
+            placeholder-text: "Old word";
+            text <=> old-word-string;
+        }
+
+        LineEdit {
+            placeholder-text: "New word";
+            text <=> new-word-string;
+        }
+
+        HorizontalBox {
+            padding: 0px;
+            add-button := Button {
+                text: "Add";
+            }
+
+            delete-button := Button {
+                text: "Delete";
+            }
+        }
+
+        Rectangle {
+            background: Palette.control-background;
+            border-color: Palette.border;
+            border-width: 1px;
+            word-list := StandardListView {
+                model <=> word-list-model;
+            }
+        }
+    }
+}

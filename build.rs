@@ -25,5 +25,5 @@ fn main() {
     .unwrap();
 
     let _ = embed_resource::compile("res.rc", embed_resource::NONE);
-    slint_build::compile("ui/app-window.slint").expect("Slint build failed");
+    slint_build::compile("ui/main_window.slint").expect("Slint build failed");
 }

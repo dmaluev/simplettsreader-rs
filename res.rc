@@ -1,6 +1,6 @@
 #include "version.h"
 
-app-icon ICON "icons/app-icon.ico"
+app_icon ICON "assets/app_icon.ico"
 
 1 VERSIONINFO
  FILEVERSION VERSION_MAJOR,VERSION_MINOR,0,VERSION_PATCH
