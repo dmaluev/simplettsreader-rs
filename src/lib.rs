@@ -2,6 +2,7 @@ slint::include_modules!();
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use slint::winit_030::{WinitWindowAccessor, winit};
 use std::collections::HashMap;
 use std::error::Error;
 use std::io::Write;
@@ -56,6 +57,30 @@ fn get_valid_recording_file_path(ext: &str) -> Option<PathBuf> {
     } else {
         Some(path)
     }
+}
+
+fn center_winit_window(window: &winit::window::Window) {
+    if let Some(monitor) = window.current_monitor() {
+        let mon_size = monitor.size();
+        let wnd_size = window.outer_size();
+        window.set_outer_position(winit::dpi::PhysicalPosition {
+            x: mon_size.width.saturating_sub(wnd_size.width) as f64 * 0.5
+                + monitor.position().x as f64,
+            y: mon_size.height.saturating_sub(wnd_size.height) as f64 * 0.5
+                + monitor.position().y as f64,
+        });
+    }
+}
+
+fn center_window(weak_main_window: slint::Weak<MainWindow>, show: bool) {
+    weak_main_window
+        .upgrade_in_event_loop(move |main_window| {
+            main_window.window().with_winit_window(center_winit_window);
+            if show {
+                main_window.show().unwrap();
+            }
+        })
+        .unwrap();
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Copy, Clone)]
@@ -174,7 +199,9 @@ impl Dictionary {
         let v: Vec<slint::StandardListViewItem> = self
             .word_map
             .iter()
-            .map(|kv| slint::StandardListViewItem::from(format!("{}={}", kv.0, kv.1).as_str()))
+            .map(|(key, value)| {
+                slint::StandardListViewItem::from(format!("{}={}", key, value).as_str())
+            })
             .collect();
         slint::ModelRc::new(slint::VecModel::<slint::StandardListViewItem>::from(v))
     }
@@ -200,10 +227,10 @@ struct SapiEventHandler {
 
 impl sapi_lite::tts::EventHandler for SapiEventHandler {
     fn on_speech_finished(&self, _id: u32) {
-        if let Some(weak_speech_app) = self.weak_speech_app.as_ref() {
-            if let Some(speech_app) = Weak::upgrade(weak_speech_app) {
-                speech_app.lock().save_audio().unwrap();
-            }
+        if let Some(weak_speech_app) = self.weak_speech_app.as_ref()
+            && let Some(speech_app) = Weak::upgrade(weak_speech_app)
+        {
+            speech_app.lock().save_audio().unwrap();
         }
     }
 }
@@ -214,7 +241,12 @@ struct SpeechApp {
     memory_stream: sapi_lite::audio::MemoryStream,
     config: Config,
     dictionary: Dictionary,
+
     weak_speech_app: Option<Weak<Mutex<SpeechApp>>>,
+
+    // Windows:
+    weak_about_window: Option<slint::Weak<AboutWindow>>,
+    weak_dictionary_window: Option<slint::Weak<DictionaryWindow>>,
 }
 
 impl SpeechApp {
@@ -229,7 +261,11 @@ impl SpeechApp {
             memory_stream: sapi_lite::audio::MemoryStream::new(None)?,
             config,
             dictionary,
+
             weak_speech_app: None,
+
+            weak_about_window: None,
+            weak_dictionary_window: None,
         };
 
         speech_app.set_voice(None)?;
@@ -390,28 +426,40 @@ impl SpeechApp {
                 }
             }
             OutputKind::SaveOpus => {
-                if let Some(path) = get_valid_recording_file_path("opus") {
-                    if let Ok(mut file) = std::fs::File::create(path) {
-                        let encoded = ogg_opus::encode::<16000, 1>(&samples)?;
-                        file.write_all(&encoded)?;
-                    }
+                if let Some(path) = get_valid_recording_file_path("opus")
+                    && let Ok(mut file) = std::fs::File::create(path)
+                {
+                    let encoded = ogg_opus::encode::<16000, 1>(&samples)?;
+                    file.write_all(&encoded)?;
                 }
             }
             OutputKind::SaveOggVorbis => {
-                if let Some(path) = get_valid_recording_file_path("ogg") {
-                    if let Ok(mut file) = std::fs::File::create(path) {
-                        let mut encoder = vorbis_encoder::Encoder::new(1, 16000, 0.2).unwrap();
-                        let encoded = encoder.encode(&samples).unwrap();
-                        file.write_all(&encoded)?;
-                        let encoded = encoder.flush().unwrap();
-                        file.write_all(&encoded)?;
-                    }
+                if let Some(path) = get_valid_recording_file_path("ogg")
+                    && let Ok(mut file) = std::fs::File::create(path)
+                {
+                    let mut encoder = vorbis_encoder::Encoder::new(1, 16000, 0.2).unwrap();
+                    let encoded = encoder.encode(&samples).unwrap();
+                    file.write_all(&encoded)?;
+                    let encoded = encoder.flush().unwrap();
+                    file.write_all(&encoded)?;
                 }
             }
             _ => (),
         }
 
         Ok(())
+    }
+
+    fn hide_about_window(&self) {
+        if let Some(window) = self.weak_about_window.as_ref() {
+            window.upgrade().inspect(|w| w.hide().unwrap());
+        }
+    }
+
+    fn hide_dictionary_window(&self) {
+        if let Some(window) = self.weak_dictionary_window.as_ref() {
+            window.upgrade().inspect(|w| w.hide().unwrap());
+        }
     }
 }
 
@@ -445,10 +493,10 @@ impl ClipboardListener {
 
 impl clipboard_master::ClipboardHandler for ClipboardListener {
     fn on_clipboard_change(&mut self) -> clipboard_master::CallbackResult {
-        if let Ok(text) = self.clipboard.get_text() {
-            if let Some(speech_app) = Weak::upgrade(&self.weak_speech_app) {
-                let _ = speech_app.lock().speak(&text);
-            }
+        if let Ok(text) = self.clipboard.get_text()
+            && let Some(speech_app) = Weak::upgrade(&self.weak_speech_app)
+        {
+            let _ = speech_app.lock().speak(&text);
         }
         clipboard_master::CallbackResult::Next
     }
@@ -504,11 +552,19 @@ pub fn run(hidden: Option<bool>) -> Result<(), Box<dyn Error>> {
             {
                 weak_main_window
                     .upgrade_in_event_loop(move |main_window| {
-                        if main_window.window().is_visible() {
-                            main_window.hide().unwrap();
-                        } else {
-                            main_window.show().unwrap();
-                        }
+                        main_window
+                            .window()
+                            .with_winit_window(|window: &winit::window::Window| {
+                                let is_vis = main_window.window().is_visible();
+                                let is_min = main_window.window().is_minimized();
+                                if is_vis && !is_min {
+                                    main_window.hide().unwrap();
+                                } else {
+                                    main_window.window().set_minimized(false);
+                                    main_window.show().unwrap();
+                                    window.focus_window();
+                                }
+                            });
                     })
                     .unwrap();
             }
@@ -562,6 +618,8 @@ pub fn run(hidden: Option<bool>) -> Result<(), Box<dyn Error>> {
     main_window.on_about_button_clicked({
         let speech_app = Arc::clone(&speech_app);
         move || {
+            speech_app.lock().hide_about_window();
+
             let version = format!(" v{}", env!("CARGO_PKG_VERSION"));
             let about_window = AboutWindow::new().unwrap();
             about_window.set_app_name(slint::SharedString::from(APP_NAME));
@@ -578,6 +636,7 @@ pub fn run(hidden: Option<bool>) -> Result<(), Box<dyn Error>> {
                 }
             });
 
+            speech_app.lock().weak_about_window = Some(about_window.as_weak());
             about_window.show().unwrap();
         }
     });
@@ -595,6 +654,8 @@ pub fn run(hidden: Option<bool>) -> Result<(), Box<dyn Error>> {
     main_window.on_dict_button_clicked({
         let speech_app = Arc::clone(&speech_app);
         move || {
+            speech_app.lock().hide_dictionary_window();
+
             let dictionary_window = DictionaryWindow::new().unwrap();
 
             dictionary_window.set_word_list_model(speech_app.lock().dictionary.get_model());
@@ -641,20 +702,21 @@ pub fn run(hidden: Option<bool>) -> Result<(), Box<dyn Error>> {
                     let dictionary_window = weak_dictionary_window.unwrap();
 
                     let item = String::from(dictionary_window.invoke_word_list_get_current_item());
-                    if !item.is_empty() {
-                        if let Some(kv) = item.split_once('=') {
-                            speech_app.lock().dictionary.word_map.remove(kv.0);
+                    if !item.is_empty()
+                        && let Some((key, _)) = item.split_once('=')
+                    {
+                        speech_app.lock().dictionary.word_map.remove(key);
 
-                            if let Some(path) = get_dictionary_path() {
-                                let _ = speech_app.lock().dictionary.save(&path);
-                            }
-                            dictionary_window
-                                .set_word_list_model(speech_app.lock().dictionary.get_model());
+                        if let Some(path) = get_dictionary_path() {
+                            let _ = speech_app.lock().dictionary.save(&path);
                         }
+                        dictionary_window
+                            .set_word_list_model(speech_app.lock().dictionary.get_model());
                     }
                 }
             });
 
+            speech_app.lock().weak_dictionary_window = Some(dictionary_window.as_weak());
             dictionary_window.show().unwrap();
         }
     });
@@ -690,9 +752,7 @@ pub fn run(hidden: Option<bool>) -> Result<(), Box<dyn Error>> {
         }
     });
 
-    if !speech_app.lock().config.hidden {
-        main_window.show()?;
-    }
+    center_window(main_window.as_weak(), !speech_app.lock().config.hidden);
     slint::run_event_loop_until_quit()?;
     main_window.hide()?;
 

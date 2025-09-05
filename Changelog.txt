@@ -1,0 +1,11 @@
+﻿Simple TTS Reader v2.0.1
+------------------------
+* Improved window handling
+* Minor improvements
+
+
+Simple TTS Reader v2.0
+----------------------
+* Initial release
+* Ability to save output as an audio file for later use
+* Added dictionary
