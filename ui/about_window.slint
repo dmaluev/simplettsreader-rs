@@ -2,13 +2,15 @@ import { VerticalBox, CheckBox, AboutSlint } from "std-widgets.slint";
 
 export component AboutWindow inherits Window {
     width: 300px;
-    height: 300px;
+    height: 440px;
     icon: @image-url("../assets/app_icon.ico");
     title <=> app-name;
     in property <string> app-name;
     in property <string> app-version;
     in-out property <bool> hidden;
+    in-out property <bool> hq-audio;
     callback hidden-cb-toggled <=> hidden-cb.toggled;
+    callback hq-audio-cb-toggled <=> hq-audio-cb.toggled;
     VerticalBox {
         HorizontalLayout {
             Image {
@@ -38,13 +40,18 @@ export component AboutWindow inherits Window {
         }
 
         Text {
-            text: "Simple TTS Reader is a small clipboard reader based on Microsoft Speech API.\nMake a selection and press Ctrl+C to copy the text you want to read aloud.\nUse --hidden argument to start in tray-only mode.";
+            text: "Simple TTS Reader is a small clipboard reader based on Microsoft Speech API.\nMake a selection and press Ctrl+C to copy the text you want to read aloud.\n\nCommand-Line arguments:\n  -t \"Some text\" - read text.\n  -f \"C:\\Path\" - read text from file.\n  --hidden - start in tray-only mode.\n";
             wrap: word-wrap;
         }
 
         hidden-cb := CheckBox {
             checked <=> hidden;
             text: "Launch hidden";
+        }
+
+        hq-audio-cb := CheckBox {
+            checked <=> hq-audio;
+            text: "High Quality audio files";
         }
 
         AboutSlint { }

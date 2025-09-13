@@ -1,6 +1,6 @@
 slint::include_modules!();
 
-use parking_lot::Mutex;
+use parking_lot::{Condvar, Mutex};
 use serde::{Deserialize, Serialize};
 use slint::winit_030::{WinitWindowAccessor, winit};
 use std::collections::HashMap;
@@ -10,23 +10,32 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
 
 const APP_NAME: &str = "Simple TTS Reader";
+const APP_ID: &str = "DmitryMaluev.SimpleTTSReader";
 
-fn get_dictionary_path() -> Option<PathBuf> {
-    let mut path = confy::get_configuration_file_path(APP_NAME, "dictionary").ok()?;
-    path.set_extension("txt");
-    Some(path)
+pub fn get_log_path() -> Result<PathBuf, Box<dyn Error>> {
+    let mut path = confy::get_configuration_file_path(APP_NAME, "log")?;
+    path.pop();
+    path.pop();
+    path.push("log.txt");
+    Ok(path)
 }
 
-fn get_recordings_path() -> Option<PathBuf> {
-    let mut path = confy::get_configuration_file_path(APP_NAME, "recordings").ok()?;
+fn get_dictionary_path() -> Result<PathBuf, Box<dyn Error>> {
+    let mut path = confy::get_configuration_file_path(APP_NAME, "dictionary")?;
+    path.set_extension("txt");
+    Ok(path)
+}
+
+fn get_recordings_path() -> Result<PathBuf, Box<dyn Error>> {
+    let mut path = confy::get_configuration_file_path(APP_NAME, "recordings")?;
     path.pop();
     path.pop();
     path.push("recordings");
     let _ = std::fs::create_dir(&path);
-    Some(path)
+    Ok(path)
 }
 
-fn get_recording_file_path(ext: &str, index: Option<u32>) -> Option<PathBuf> {
+fn get_recording_file_path(ext: &str, index: Option<u32>) -> Result<PathBuf, Box<dyn Error>> {
     let mut path = get_recordings_path()?;
     let local_datetime = chrono::Local::now();
     let mut timestamp = local_datetime.format("%Y%m%d_%H%M%S").to_string();
@@ -35,28 +44,37 @@ fn get_recording_file_path(ext: &str, index: Option<u32>) -> Option<PathBuf> {
     }
     path.push(timestamp);
     path.set_extension(ext);
-    Some(path)
+    Ok(path)
 }
 
-fn get_valid_recording_file_path(ext: &str) -> Option<PathBuf> {
+fn get_valid_recording_file_path(ext: &str) -> Result<PathBuf, Box<dyn Error>> {
     let path = get_recording_file_path(ext, None)?;
     // Try without index:
-    if std::fs::exists(&path).ok()? {
+    if std::fs::exists(&path)? {
         // Find suitable index:
         let mut index: u32 = 0;
         loop {
             let path = get_recording_file_path(ext, Some(index))?;
-            if !std::fs::exists(&path).ok()? {
-                return Some(path);
+            if !std::fs::exists(&path)? {
+                return Ok(path);
             }
             index += 1;
             if index == 100 {
-                return None; // Too many indices.
+                return Err("Too many indices".into());
             }
         }
     } else {
-        Some(path)
+        Ok(path)
     }
+}
+
+pub fn open_recordings_path() -> Result<(), Box<dyn Error>> {
+    let path = get_recordings_path()?;
+    std::process::Command::new("explorer")
+        .arg(path)
+        .spawn()?
+        .wait()?;
+    Ok(())
 }
 
 fn center_winit_window(window: &winit::window::Window) {
@@ -92,12 +110,14 @@ enum OutputKind {
 }
 
 #[derive(Serialize, Deserialize, PartialEq)]
+#[serde(default)]
 struct Config {
     voice_name: String,
     rate: i32,
     volume: u32,
     hidden: bool,
     output: OutputKind,
+    hq_audio: bool,
 }
 
 impl Config {
@@ -126,6 +146,7 @@ impl std::default::Default for Config {
             volume: 100,
             hidden: false,
             output: OutputKind::Speak,
+            hq_audio: false,
         }
     }
 }
@@ -135,6 +156,15 @@ struct Dictionary {
 }
 
 impl Dictionary {
+    fn build() -> Result<Self, Box<dyn Error>> {
+        let mut dictionary = Dictionary {
+            word_map: HashMap::new(),
+        };
+        let path = get_dictionary_path()?;
+        dictionary.load(&path)?;
+        Ok(dictionary)
+    }
+
     fn replace_words(&self, input: &str) -> Option<String> {
         if self.word_map.is_empty() {
             return None;
@@ -173,15 +203,17 @@ impl Dictionary {
 
     fn load(&mut self, path: &Path) -> std::io::Result<()> {
         self.word_map.clear();
-        let contents = std::fs::read_to_string(path)?;
-        for line in contents.lines() {
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
+        if std::fs::exists(path)? {
+            let contents = std::fs::read_to_string(path)?;
+            for line in contents.lines() {
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
 
-            if let Some((key, value)) = line.split_once('=') {
-                self.word_map
-                    .insert(key.trim().to_string(), value.trim().to_string());
+                if let Some((key, value)) = line.split_once('=') {
+                    self.word_map
+                        .insert(key.trim().to_string(), value.trim().to_string());
+                }
             }
         }
         Ok(())
@@ -189,20 +221,27 @@ impl Dictionary {
 
     fn save(&self, path: &Path) -> std::io::Result<()> {
         let mut file = std::fs::File::create(path)?;
-        for (key, value) in &self.word_map {
-            writeln!(file, "{key}={value}")?;
+        let mut v: Vec<String> = self
+            .word_map
+            .iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect();
+        v.sort_unstable();
+        for line in v {
+            writeln!(file, "{line}")?;
         }
         Ok(())
     }
 
     fn get_model(&self) -> slint::ModelRc<slint::StandardListViewItem> {
-        let v: Vec<slint::StandardListViewItem> = self
+        let mut v: Vec<slint::StandardListViewItem> = self
             .word_map
             .iter()
             .map(|(key, value)| {
                 slint::StandardListViewItem::from(format!("{}={}", key, value).as_str())
             })
             .collect();
+        v.sort_unstable_by(|a, b| a.text.cmp(&b.text));
         slint::ModelRc::new(slint::VecModel::<slint::StandardListViewItem>::from(v))
     }
 }
@@ -218,11 +257,25 @@ fn get_voice_name(voice: &sapi_lite::tts::Voice) -> String {
         .unwrap_or_default()
         .to_string_lossy()
         .into_owned();
-    format!("{name} [{lang}]")
+    if lang.is_empty() {
+        name
+    } else {
+        format!("{name} [{lang}]")
+    }
 }
 
 struct SapiEventHandler {
     weak_speech_app: Option<Weak<Mutex<SpeechApp>>>,
+    weak_cv_finished: Option<Weak<Condvar>>,
+}
+
+impl SapiEventHandler {
+    fn new() -> Self {
+        SapiEventHandler {
+            weak_speech_app: None,
+            weak_cv_finished: None,
+        }
+    }
 }
 
 impl sapi_lite::tts::EventHandler for SapiEventHandler {
@@ -231,6 +284,12 @@ impl sapi_lite::tts::EventHandler for SapiEventHandler {
             && let Some(speech_app) = Weak::upgrade(weak_speech_app)
         {
             speech_app.lock().save_audio().unwrap();
+        }
+
+        if let Some(weak_cv_finished) = self.weak_cv_finished.as_ref()
+            && let Some(cv_finished) = Weak::upgrade(weak_cv_finished)
+        {
+            cv_finished.notify_all();
         }
     }
 }
@@ -241,8 +300,11 @@ struct SpeechApp {
     memory_stream: sapi_lite::audio::MemoryStream,
     config: Config,
     dictionary: Dictionary,
+    toast_manager: winrt_toast::ToastManager,
 
+    // For SapiEventHandler:
     weak_speech_app: Option<Weak<Mutex<SpeechApp>>>,
+    weak_cv_finished: Option<Weak<Condvar>>,
 
     // Windows:
     weak_about_window: Option<slint::Weak<AboutWindow>>,
@@ -254,15 +316,15 @@ impl SpeechApp {
         sapi_lite::initialize()?;
 
         let mut speech_app = Self {
-            synth: sapi_lite::tts::EventfulSynthesizer::new(SapiEventHandler {
-                weak_speech_app: None,
-            })?,
+            synth: sapi_lite::tts::EventfulSynthesizer::new(SapiEventHandler::new())?,
             voices: sapi_lite::tts::installed_voices(None, None)?.collect(),
             memory_stream: sapi_lite::audio::MemoryStream::new(None)?,
             config,
             dictionary,
+            toast_manager: winrt_toast::ToastManager::new(APP_ID),
 
             weak_speech_app: None,
+            weak_cv_finished: None,
 
             weak_about_window: None,
             weak_dictionary_window: None,
@@ -339,11 +401,8 @@ impl SpeechApp {
     fn speak(&mut self, speech: &str) -> Result<u32, Box<dyn Error>> {
         // TODO: Find a better way to stop active speech
         self.synth = sapi_lite::tts::EventfulSynthesizer::new(SapiEventHandler {
-            weak_speech_app: if self.weak_speech_app.is_some() {
-                Some(Weak::clone(self.weak_speech_app.as_ref().unwrap()))
-            } else {
-                None
-            },
+            weak_speech_app: self.weak_speech_app.as_ref().map(Weak::clone),
+            weak_cv_finished: self.weak_cv_finished.as_ref().map(Weak::clone),
         })?;
 
         self.set_voice(None)?;
@@ -352,7 +411,11 @@ impl SpeechApp {
 
         if self.config.output != OutputKind::Speak {
             let audio_format = sapi_lite::audio::AudioFormat {
-                sample_rate: sapi_lite::audio::SampleRate::Hz16000,
+                sample_rate: if self.config.hq_audio {
+                    sapi_lite::audio::SampleRate::Hz48000
+                } else {
+                    sapi_lite::audio::SampleRate::Hz16000
+                },
                 bit_rate: sapi_lite::audio::BitRate::Bits16,
                 channels: sapi_lite::audio::Channels::Mono,
             };
@@ -409,42 +472,62 @@ impl SpeechApp {
             return Ok(());
         }
 
+        let sample_rate = if self.config.hq_audio { 48000 } else { 16000 };
+        let mut notif = String::from("");
         match self.config.output {
             OutputKind::SaveWAV => {
-                if let Some(path) = get_valid_recording_file_path("wav") {
-                    let wav_spec = hound::WavSpec {
-                        channels: 1,
-                        sample_rate: 16000,
-                        bits_per_sample: 16,
-                        sample_format: hound::SampleFormat::Int,
-                    };
-                    let mut wav_writer = hound::WavWriter::create(path, wav_spec)?;
-                    for sample in &samples {
-                        wav_writer.write_sample(*sample)?;
-                    }
-                    wav_writer.finalize()?;
+                let path = get_valid_recording_file_path("wav")?;
+                let wav_spec = hound::WavSpec {
+                    channels: 1,
+                    sample_rate,
+                    bits_per_sample: 16,
+                    sample_format: hound::SampleFormat::Int,
+                };
+                let mut wav_writer = hound::WavWriter::create(path, wav_spec)?;
+                for sample in &samples {
+                    wav_writer.write_sample(*sample)?;
                 }
+                wav_writer.finalize()?;
+                notif = String::from("WAV file is ready");
             }
             OutputKind::SaveOpus => {
-                if let Some(path) = get_valid_recording_file_path("opus")
-                    && let Ok(mut file) = std::fs::File::create(path)
-                {
-                    let encoded = ogg_opus::encode::<16000, 1>(&samples)?;
-                    file.write_all(&encoded)?;
-                }
+                let path = get_valid_recording_file_path("opus")?;
+                let mut file = std::fs::File::create(path)?;
+                let encoded = if self.config.hq_audio {
+                    ogg_opus::encode::<48000, 1>(&samples)?
+                } else {
+                    ogg_opus::encode::<16000, 1>(&samples)?
+                };
+                file.write_all(&encoded)?;
+                notif = String::from("Opus file is ready");
             }
             OutputKind::SaveOggVorbis => {
-                if let Some(path) = get_valid_recording_file_path("ogg")
-                    && let Ok(mut file) = std::fs::File::create(path)
-                {
-                    let mut encoder = vorbis_encoder::Encoder::new(1, 16000, 0.2).unwrap();
-                    let encoded = encoder.encode(&samples).unwrap();
-                    file.write_all(&encoded)?;
-                    let encoded = encoder.flush().unwrap();
-                    file.write_all(&encoded)?;
-                }
+                let path = get_valid_recording_file_path("ogg")?;
+                let mut file = std::fs::File::create(path)?;
+                let mut encoder = vorbis_encoder::Encoder::new(
+                    1,
+                    sample_rate as u64,
+                    if self.config.hq_audio { 0.5 } else { 0.2 },
+                )
+                .unwrap();
+                let encoded = encoder.encode(&samples).unwrap();
+                file.write_all(&encoded)?;
+                let encoded = encoder.flush().unwrap();
+                file.write_all(&encoded)?;
+                notif = String::from("Ogg Vorbis file is ready");
             }
             _ => (),
+        }
+
+        if !notif.is_empty() {
+            if self.config.hq_audio {
+                notif += " (HQ)";
+            }
+            let mut toast = winrt_toast::Toast::new();
+            toast
+                .text1(notif)
+                .expires_in(std::time::Duration::from_secs(60 * 60));
+            self.toast_manager.show(&toast).unwrap();
         }
 
         Ok(())
@@ -519,12 +602,7 @@ pub fn run(hidden: Option<bool>) -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let mut dictionary = Dictionary {
-        word_map: HashMap::new(),
-    };
-    if let Some(path) = get_dictionary_path() {
-        let _ = dictionary.load(&path);
-    }
+    let dictionary = Dictionary::build()?;
 
     let speech_app = Arc::new(Mutex::new(SpeechApp::build(config, dictionary)?));
     speech_app.lock().weak_speech_app = Some(Arc::downgrade(&speech_app));
@@ -625,6 +703,7 @@ pub fn run(hidden: Option<bool>) -> Result<(), Box<dyn Error>> {
             about_window.set_app_name(slint::SharedString::from(APP_NAME));
             about_window.set_app_version(slint::SharedString::from(version));
             about_window.set_hidden(speech_app.lock().config.hidden);
+            about_window.set_hq_audio(speech_app.lock().config.hq_audio);
 
             about_window.on_hidden_cb_toggled({
                 let weak_about_window = about_window.as_weak();
@@ -632,6 +711,15 @@ pub fn run(hidden: Option<bool>) -> Result<(), Box<dyn Error>> {
                 move || {
                     let about_window = weak_about_window.unwrap();
                     speech_app.lock().config.hidden = about_window.get_hidden();
+                    speech_app.lock().config.store();
+                }
+            });
+            about_window.on_hq_audio_cb_toggled({
+                let weak_about_window = about_window.as_weak();
+                let speech_app = Arc::clone(&speech_app);
+                move || {
+                    let about_window = weak_about_window.unwrap();
+                    speech_app.lock().config.hq_audio = about_window.get_hq_audio();
                     speech_app.lock().config.store();
                 }
             });
@@ -687,7 +775,7 @@ pub fn run(hidden: Option<bool>) -> Result<(), Box<dyn Error>> {
                             .word_map
                             .insert(old_word, new_word);
 
-                        if let Some(path) = get_dictionary_path() {
+                        if let Ok(path) = get_dictionary_path() {
                             let _ = speech_app.lock().dictionary.save(&path);
                         }
                         dictionary_window
@@ -707,7 +795,7 @@ pub fn run(hidden: Option<bool>) -> Result<(), Box<dyn Error>> {
                     {
                         speech_app.lock().dictionary.word_map.remove(key);
 
-                        if let Some(path) = get_dictionary_path() {
+                        if let Ok(path) = get_dictionary_path() {
                             let _ = speech_app.lock().dictionary.save(&path);
                         }
                         dictionary_window
@@ -737,24 +825,45 @@ pub fn run(hidden: Option<bool>) -> Result<(), Box<dyn Error>> {
     });
     main_window.on_output_button_clicked({
         move || {
-            if let Some(path) = get_recordings_path() {
-                let _ = std::process::Command::new("explorer")
-                    .arg(path)
-                    .spawn()
-                    .unwrap()
-                    .wait();
-            }
+            let _ = open_recordings_path();
         }
     });
     main_window.on_link_ta_clicked({
         move || {
-            open::that("https://simplettsreader.sourceforge.io/").unwrap();
+            let _ = open::that("https://simplettsreader.sourceforge.io/");
         }
     });
 
     center_window(main_window.as_weak(), !speech_app.lock().config.hidden);
     slint::run_event_loop_until_quit()?;
     main_window.hide()?;
+
+    Ok(())
+}
+
+pub fn run_simple(text: Option<String>, path: Option<String>) -> Result<(), Box<dyn Error>> {
+    let final_text = match (text, path) {
+        (Some(t), _) => t,
+        (None, Some(p)) => std::fs::read_to_string(p)?,
+        _ => String::new(),
+    };
+
+    if final_text.is_empty() {
+        return Ok(());
+    }
+
+    let config = Config::load(true);
+    let dictionary = Dictionary::build()?;
+
+    let speech_app = Arc::new(Mutex::new(SpeechApp::build(config, dictionary)?));
+    let cv_finished = Arc::new(Condvar::new());
+    speech_app.lock().weak_cv_finished = Some(Arc::downgrade(&cv_finished));
+
+    {
+        let mut mutex_guard = speech_app.lock();
+        mutex_guard.speak(&final_text)?;
+        cv_finished.wait(&mut mutex_guard);
+    }
 
     Ok(())
 }

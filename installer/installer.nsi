@@ -1,4 +1,7 @@
-!define PRODUCT_VERSION    "2.0.1"
+!include MUI2.nsh
+!include shortcut-properties.nsh
+
+!define PRODUCT_VERSION    "2.0.2"
 
 !define PRODUCT_NAME       "Simple TTS Reader"
 !define PRODUCT_NAME_SETUP "SimpleTTSReader"
@@ -11,7 +14,6 @@
 !define RK_SOFT_MS_WIN_CV  "SOFTWARE\Microsoft\Windows\CurrentVersion"
 !define RK_APP_PATHS       "${RK_SOFT_MS_WIN_CV}\App Paths\${PRODUCT_MAIN_EXE}"
 !define RK_UNINSTALL       "${RK_SOFT_MS_WIN_CV}\Uninstall\${PRODUCT_GUID}"
-!define RK_RUN             "${RK_SOFT_MS_WIN_CV}\Run"
 
 !define SOURCE_DIR         ".."
 
@@ -24,8 +26,6 @@ RequestExecutionLevel admin
 ShowInstDetails       show
 ShowUnInstDetails     show
 Unicode               true
-
-!include "MUI2.nsh"
 
 !define MUI_ABORTWARNING
 !define MUI_ICON   "${NSISDIR}\Contrib\Graphics\Icons\orange-install.ico"
@@ -40,36 +40,59 @@ Unicode               true
 !insertmacro MUI_UNPAGE_FINISH
 !insertmacro MUI_LANGUAGE "English"
 
-Section "MainSection" SEC01
-    SetCompress        auto
-    SetOutPath         "$INSTDIR"
-    SetOverwrite       ifnewer
-    SetShellVarContext all
+Section Main
+    SetOutPath $INSTDIR
+    SetOverwrite ifnewer
 
     File "simplettsreader.exe"
     File "${SOURCE_DIR}\Changelog.txt"
-    File "${SOURCE_DIR}\License.html"
     File "${SOURCE_DIR}\License (Slint).html"
+    File "${SOURCE_DIR}\License.html"
+SectionEnd
+
+Section Uninstall
+    SetAutoClose true
+    SetShellVarContext all
+
+    Delete "$INSTDIR\simplettsreader.exe"
+    Delete "$INSTDIR\Changelog.txt"
+    Delete "$INSTDIR\License (Slint).html"
+    Delete "$INSTDIR\License.html"
+
+    Delete "$INSTDIR\uninst.exe"
+    Delete "$INSTDIR\Uninstall.exe"
+
+    RMDir $INSTDIR
+
+    Delete "$SMPROGRAMS\${PRODUCT_MAIN_DIR}\${PRODUCT_NAME}.lnk"
+    Delete "$SMPROGRAMS\${PRODUCT_MAIN_DIR}\License (Slint).lnk"
+    Delete "$SMPROGRAMS\${PRODUCT_MAIN_DIR}\License.lnk"
+    Delete "$SMPROGRAMS\${PRODUCT_MAIN_DIR}\Uninstall.lnk"
+    RMDir  "$SMPROGRAMS\${PRODUCT_MAIN_DIR}"
+
+    Delete "$DESKTOP\${PRODUCT_NAME}.lnk"
+
+    DeleteRegKey HKLM "${RK_APP_PATHS}"
+    DeleteRegKey HKLM "${RK_UNINSTALL}"
+    SetRegView 64
+    DeleteRegKey HKLM "SOFTWARE\Classes\CLSID\${PRODUCT_GUID}"
+    SetRegView 32
+SectionEnd
+
+Section -Shortcuts
+    SetShellVarContext all
 
     CreateDirectory "$SMPROGRAMS\${PRODUCT_MAIN_DIR}"
     CreateShortCut  "$SMPROGRAMS\${PRODUCT_MAIN_DIR}\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_MAIN_EXE}"
-    CreateShortCut  "$SMPROGRAMS\${PRODUCT_MAIN_DIR}\License.lnk"         "$INSTDIR\License.html"
     CreateShortCut  "$SMPROGRAMS\${PRODUCT_MAIN_DIR}\License (Slint).lnk" "$INSTDIR\License (Slint).html"
-    CreateShortCut  "$DESKTOP\${PRODUCT_NAME}.lnk"                        "$INSTDIR\${PRODUCT_MAIN_EXE}"
+    CreateShortCut  "$SMPROGRAMS\${PRODUCT_MAIN_DIR}\License.lnk"         "$INSTDIR\License.html"
+
+    CreateShortCut  "$SMPROGRAMS\${PRODUCT_MAIN_DIR}\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
+
+    CreateShortCut  "$DESKTOP\${PRODUCT_NAME}.lnk" "$INSTDIR\${PRODUCT_MAIN_EXE}"
 SectionEnd
 
-Section "Visual Studio Runtime"
-    SetOutPath "$INSTDIR"
-    File "VC_redist.x64.exe"
-    ExecWait '"$INSTDIR\VC_redist.x64.exe" /quiet'
-    Delete "$INSTDIR\VC_redist.x64.exe"
-SectionEnd
-
-Section -AdditionalIcons
-    CreateShortCut "$SMPROGRAMS\${PRODUCT_MAIN_DIR}\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
-SectionEnd
-
-Section -Post
+Section -RegUninstall
     WriteUninstaller "$INSTDIR\Uninstall.exe"
     WriteRegStr HKLM "${RK_APP_PATHS}" ""                "$INSTDIR\${PRODUCT_MAIN_EXE}"
     WriteRegStr HKLM "${RK_UNINSTALL}" "DisplayIcon"     "$INSTDIR\${PRODUCT_MAIN_EXE}"
@@ -80,29 +103,25 @@ Section -Post
     WriteRegStr HKLM "${RK_UNINSTALL}" "URLInfoAbout"    "${PRODUCT_URL}"
 SectionEnd
 
-Section Uninstall
+Section -RegToast
     SetShellVarContext all
 
-    Delete "$INSTDIR\simplettsreader.exe"
-    Delete "$INSTDIR\Changelog.txt"
-    Delete "$INSTDIR\License.html"
-    Delete "$INSTDIR\License (Slint).html"
+    !insertmacro ShortcutSetToastProperties "$SMPROGRAMS\${PRODUCT_MAIN_DIR}\${PRODUCT_NAME}.lnk" "${PRODUCT_GUID}" "DmitryMaluev.SimpleTTSReader"
+    pop $0
+    ${If} $0 <> 0
+        MessageBox MB_ICONEXCLAMATION "Shortcut-Attributes to enable Toast Messages couldn't be set"
+        SetErrors
+        Abort
+    ${EndIf}
+    SetRegView 64
+    WriteRegStr HKLM "SOFTWARE\Classes\CLSID\${PRODUCT_GUID}\LocalServer32" "" "$INSTDIR\${PRODUCT_MAIN_EXE}"
+    SetRegView 32
+SectionEnd
 
-    Delete "$INSTDIR\uninst.exe"
-    Delete "$INSTDIR\Uninstall.exe"
-
-    Delete "$SMPROGRAMS\${PRODUCT_MAIN_DIR}\${PRODUCT_NAME}.lnk"
-    Delete "$SMPROGRAMS\${PRODUCT_MAIN_DIR}\License.lnk"
-    Delete "$SMPROGRAMS\${PRODUCT_MAIN_DIR}\License (Slint).lnk"
-    Delete "$SMPROGRAMS\${PRODUCT_MAIN_DIR}\Uninstall.lnk"
-    RMDir  "$SMPROGRAMS\${PRODUCT_MAIN_DIR}"
-    Delete "$DESKTOP\${PRODUCT_NAME}.lnk"
-
-    RMDir "$INSTDIR"
-
-    DeleteRegKey HKLM "${RK_UNINSTALL}"
-    DeleteRegKey HKLM "${RK_APP_PATHS}"
-    SetAutoClose true
+Section -VisualStudioRuntime
+    File "VC_redist.x64.exe"
+    ExecWait '"$INSTDIR\VC_redist.x64.exe" /quiet'
+    Delete "$INSTDIR\VC_redist.x64.exe"
 SectionEnd
 
 Function .onInit

@@ -1,4 +1,14 @@
-﻿Simple TTS Reader v2.0.1
+﻿Simple TTS Reader v2.0.2
+------------------------
+* New command-line arguments:
+  -t: Enables reading text directly from the command line for immediate processing
+  -f: Allows reading text content from a specified file
+* Toast notifications appear when audio files are successfully saved
+* Option to save High Quality audio files
+* Upon encountering an error, a log file (log.txt) is automatically generated
+
+
+Simple TTS Reader v2.0.1
 ------------------------
 * Improved window handling
 * Minor improvements
