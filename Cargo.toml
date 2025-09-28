@@ -1,6 +1,6 @@
 [package]
 name = "simplettsreader"
-version = "2.0.2"
+version = "2.0.3"
 authors = ["Dmitry Maluev <dmaluev@gmail.com>"]
 edition = "2024"
 description = "Simple TTS Reader: A small clipboard reader"
@@ -22,7 +22,7 @@ open = "5.3.2"
 parking_lot = "0.12.4"
 pico-args = "0.5.0"
 sapi-lite = "0.1.1"
-serde = { version = "1.0.226", features = ["derive"] }
+serde = { version = "1.0.228", features = ["derive"] }
 simplelog = "0.12.2"
 single-instance = "0.3.3"
 slint = { version = "1.13.1", features = ["image-default-formats", "renderer-skia", "unstable-winit-030"] }

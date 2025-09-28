@@ -101,6 +101,25 @@ fn center_window(weak_main_window: slint::Weak<MainWindow>, show: bool) {
         .unwrap();
 }
 
+fn find_first_sentences(speech: &str, max_chars: usize) -> &str {
+    if speech.is_empty() || max_chars == 0 {
+        return speech;
+    }
+    const PUNCTUATION: [u8; 3] = [b'!', b'.', b'?'];
+    for i in (0..speech.len()).rev() {
+        let byte = speech.as_bytes()[i];
+        if PUNCTUATION.contains(&byte)
+            && (i + 1 == speech.len() || speech.as_bytes()[i + 1].is_ascii_whitespace())
+        {
+            let sentences_len = i + 1;
+            if sentences_len <= max_chars {
+                return &speech[..sentences_len];
+            }
+        }
+    }
+    &speech[..speech.len().min(max_chars)]
+}
+
 #[derive(Serialize, Deserialize, PartialEq, Copy, Clone)]
 enum OutputKind {
     Speak,
@@ -118,6 +137,7 @@ struct Config {
     hidden: bool,
     output: OutputKind,
     hq_audio: bool,
+    chunked: bool,
 }
 
 impl Config {
@@ -147,6 +167,7 @@ impl std::default::Default for Config {
             hidden: false,
             output: OutputKind::Speak,
             hq_audio: false,
+            chunked: false,
         }
     }
 }
@@ -283,13 +304,23 @@ impl sapi_lite::tts::EventHandler for SapiEventHandler {
         if let Some(weak_speech_app) = self.weak_speech_app.as_ref()
             && let Some(speech_app) = Weak::upgrade(weak_speech_app)
         {
-            speech_app.lock().save_audio().unwrap();
-        }
+            let mut locked_speech_app = speech_app.lock();
+            if locked_speech_app.finished_speech() {
+                // Save:
+                let _ = locked_speech_app.save_audio();
 
-        if let Some(weak_cv_finished) = self.weak_cv_finished.as_ref()
-            && let Some(cv_finished) = Weak::upgrade(weak_cv_finished)
-        {
-            cv_finished.notify_all();
+                // Notify:
+                if let Some(weak_cv_finished) = self.weak_cv_finished.as_ref()
+                    && let Some(cv_finished) = Weak::upgrade(weak_cv_finished)
+                {
+                    cv_finished.notify_all();
+                }
+            } else {
+                // Throttle speak calls:
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                // Continue reading:
+                let _ = locked_speech_app.speak_chunked();
+            }
         }
     }
 }
@@ -301,6 +332,7 @@ struct SpeechApp {
     config: Config,
     dictionary: Dictionary,
     toast_manager: winrt_toast::ToastManager,
+    chunked_speech: String,
 
     // For SapiEventHandler:
     weak_speech_app: Option<Weak<Mutex<SpeechApp>>>,
@@ -322,6 +354,7 @@ impl SpeechApp {
             config,
             dictionary,
             toast_manager: winrt_toast::ToastManager::new(APP_ID),
+            chunked_speech: String::new(),
 
             weak_speech_app: None,
             weak_cv_finished: None,
@@ -398,17 +431,7 @@ impl SpeechApp {
         }
     }
 
-    fn speak(&mut self, speech: &str) -> Result<u32, Box<dyn Error>> {
-        // TODO: Find a better way to stop active speech
-        self.synth = sapi_lite::tts::EventfulSynthesizer::new(SapiEventHandler {
-            weak_speech_app: self.weak_speech_app.as_ref().map(Weak::clone),
-            weak_cv_finished: self.weak_cv_finished.as_ref().map(Weak::clone),
-        })?;
-
-        self.set_voice(None)?;
-        self.set_rate(None)?;
-        self.set_volume(None)?;
-
+    fn set_output_stream(&self) -> Result<(), Box<dyn Error>> {
         if self.config.output != OutputKind::Speak {
             let audio_format = sapi_lite::audio::AudioFormat {
                 sample_rate: if self.config.hq_audio {
@@ -426,10 +449,49 @@ impl SpeechApp {
             self.synth
                 .set_output(sapi_lite::tts::SpeechOutput::Stream(audio_stream), false)?;
         }
+        Ok(())
+    }
+
+    fn speak(&mut self, speech: &str) -> Result<u32, Box<dyn Error>> {
+        if !self.finished_speech() {
+            return Ok(0);
+        }
+
+        // TODO: Find a better way to stop active speech
+        self.synth = sapi_lite::tts::EventfulSynthesizer::new(SapiEventHandler {
+            weak_speech_app: self.weak_speech_app.as_ref().map(Weak::clone),
+            weak_cv_finished: self.weak_cv_finished.as_ref().map(Weak::clone),
+        })?;
+
+        self.set_voice(None)?;
+        self.set_rate(None)?;
+        self.set_volume(None)?;
+
+        self.set_output_stream()?;
+
+        if self.config.chunked {
+            self.chunked_speech = String::from(speech);
+            self.speak_chunked()?;
+            Ok(0)
+        } else {
+            let new_speech = self.dictionary.replace_words(speech);
+            Ok(self.synth.speak(new_speech.as_deref().unwrap_or(speech))?)
+        }
+    }
+
+    fn speak_chunked(&mut self) -> Result<(), Box<dyn Error>> {
+        let speech = find_first_sentences(&self.chunked_speech, 1000);
 
         let new_speech = self.dictionary.replace_words(speech);
+        self.synth.speak(new_speech.as_deref().unwrap_or(speech))?;
 
-        Ok(self.synth.speak(new_speech.as_deref().unwrap_or(speech))?)
+        self.chunked_speech = String::from(&self.chunked_speech[speech.len()..]);
+
+        Ok(())
+    }
+
+    fn finished_speech(&self) -> bool {
+        !self.config.chunked || self.chunked_speech.is_empty()
     }
 
     fn save_audio(&self) -> Result<(), Box<dyn Error>> {
@@ -466,7 +528,7 @@ impl SpeechApp {
         }
 
         unsafe {
-            stream.SetSize(0)?;
+            stream.SetSize(0)?; // Done with this stream.
         }
         if samples.is_empty() {
             return Ok(());
@@ -589,13 +651,14 @@ impl clipboard_master::ClipboardHandler for ClipboardListener {
     }
 }
 
-pub fn run(hidden: Option<bool>) -> Result<(), Box<dyn Error>> {
+pub fn run(hidden: Option<bool>, chunked: Option<bool>) -> Result<(), Box<dyn Error>> {
     let mut config;
     {
         let original_config = Config::load(false);
         config = Config::load(true);
 
         config.hidden = hidden.unwrap_or(config.hidden);
+        config.chunked = chunked.unwrap_or(config.chunked);
 
         if config != original_config {
             config.store();
@@ -610,7 +673,11 @@ pub fn run(hidden: Option<bool>) -> Result<(), Box<dyn Error>> {
     ClipboardListener::spawn(Arc::downgrade(&speech_app));
 
     let main_window = MainWindow::new()?;
-    main_window.set_app_name(slint::SharedString::from(APP_NAME));
+    if speech_app.lock().config.chunked {
+        main_window.set_app_name(slint::SharedString::from(APP_NAME) + " [CHUNKED]");
+    } else {
+        main_window.set_app_name(slint::SharedString::from(APP_NAME));
+    }
 
     let _tray_icon;
     {
@@ -857,12 +924,13 @@ pub fn run_simple(text: Option<String>, path: Option<String>) -> Result<(), Box<
 
     let speech_app = Arc::new(Mutex::new(SpeechApp::build(config, dictionary)?));
     let cv_finished = Arc::new(Condvar::new());
+    speech_app.lock().weak_speech_app = Some(Arc::downgrade(&speech_app));
     speech_app.lock().weak_cv_finished = Some(Arc::downgrade(&cv_finished));
 
     {
-        let mut mutex_guard = speech_app.lock();
-        mutex_guard.speak(&final_text)?;
-        cv_finished.wait(&mut mutex_guard);
+        let mut locked_speech_app = speech_app.lock();
+        locked_speech_app.speak(&final_text)?;
+        cv_finished.wait(&mut locked_speech_app);
     }
 
     Ok(())

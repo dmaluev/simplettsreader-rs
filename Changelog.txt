@@ -1,4 +1,12 @@
-﻿Simple TTS Reader v2.0.2
+﻿Simple TTS Reader v2.0.3
+------------------------
+* New chunked mode (command-line: --chunked) can help bypass time limits of online TTS services
+  by splitting large texts into smaller segments for creating long audio files
+* Resolved an issue where the -t and -f parameters were not functioning correctly
+  when the output was directed to a file instead of the default Speak mode
+
+
+Simple TTS Reader v2.0.2
 ------------------------
 * New command-line arguments:
   -t: Enables reading text directly from the command line for immediate processing

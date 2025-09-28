@@ -1,7 +1,7 @@
 !include MUI2.nsh
 !include shortcut-properties.nsh
 
-!define PRODUCT_VERSION    "2.0.2"
+!define PRODUCT_VERSION    "2.0.3"
 
 !define PRODUCT_NAME       "Simple TTS Reader"
 !define PRODUCT_NAME_SETUP "SimpleTTSReader"

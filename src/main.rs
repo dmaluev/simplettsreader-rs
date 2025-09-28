@@ -54,7 +54,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let hidden = pargs.opt_value_from_str("--hidden").unwrap_or(Some(true));
-    if let Err(e) = simplettsreader::run(hidden) {
+    let chunked = pargs.opt_value_from_str("--chunked").unwrap_or(Some(true));
+    if let Err(e) = simplettsreader::run(hidden, chunked) {
         log_error(&*e);
         Err(e)
     } else {
