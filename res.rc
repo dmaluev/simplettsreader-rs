@@ -23,7 +23,7 @@ BEGIN
             VALUE "FileDescription", VERSION_DESCRIPTION
             VALUE "FileVersion", VERSION_FULL
             VALUE "InternalName", VERSION_NAME
-            VALUE "LegalCopyright", "Copyright (C) 2025 Dmitry Maluev"
+            VALUE "LegalCopyright", "Copyright (C) 2025-2026 Dmitry Maluev"
             VALUE "OriginalFilename", "simplettsreader.exe"
             VALUE "ProductName", VERSION_NAME
             VALUE "ProductVersion", VERSION_FULL

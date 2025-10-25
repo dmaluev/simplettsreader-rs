@@ -1,5 +1,5 @@
 // Simple TTS Reader is a small clipboard reader
-// © 2025 Dmitry Maluev <dmaluev@gmail.com>
+// © 2025-2026 Dmitry Maluev <dmaluev@gmail.com>
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 

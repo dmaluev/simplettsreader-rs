@@ -49,9 +49,9 @@ fn get_recording_file_path(ext: &str, index: Option<u32>) -> Result<PathBuf, Box
 
 fn get_valid_recording_file_path(ext: &str) -> Result<PathBuf, Box<dyn Error>> {
     let path = get_recording_file_path(ext, None)?;
-    // Try without index:
+    // Try without index
     if std::fs::exists(&path)? {
-        // Find suitable index:
+        // Find suitable index
         let mut index: u32 = 0;
         loop {
             let path = get_recording_file_path(ext, Some(index))?;
@@ -140,6 +140,20 @@ struct Config {
     chunked: bool,
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            voice_name: String::from(""),
+            rate: 0,
+            volume: 100,
+            hidden: false,
+            output: OutputKind::Speak,
+            hq_audio: false,
+            chunked: false,
+        }
+    }
+}
+
 impl Config {
     fn load(sanitize: bool) -> Self {
         if let Ok(mut config) = confy::load::<Self>(APP_NAME, "config") {
@@ -158,27 +172,13 @@ impl Config {
     }
 }
 
-impl std::default::Default for Config {
-    fn default() -> Self {
-        Self {
-            voice_name: String::from(""),
-            rate: 0,
-            volume: 100,
-            hidden: false,
-            output: OutputKind::Speak,
-            hq_audio: false,
-            chunked: false,
-        }
-    }
-}
-
 struct Dictionary {
     word_map: HashMap<String, String>,
 }
 
 impl Dictionary {
-    fn build() -> Result<Self, Box<dyn Error>> {
-        let mut dictionary = Dictionary {
+    fn try_new() -> Result<Self, Box<dyn Error>> {
+        let mut dictionary = Self {
             word_map: HashMap::new(),
         };
         let path = get_dictionary_path()?;
@@ -292,7 +292,7 @@ struct SapiEventHandler {
 
 impl SapiEventHandler {
     fn new() -> Self {
-        SapiEventHandler {
+        Self {
             weak_speech_app: None,
             weak_cv_finished: None,
         }
@@ -302,23 +302,23 @@ impl SapiEventHandler {
 impl sapi_lite::tts::EventHandler for SapiEventHandler {
     fn on_speech_finished(&self, _id: u32) {
         if let Some(weak_speech_app) = self.weak_speech_app.as_ref()
-            && let Some(speech_app) = Weak::upgrade(weak_speech_app)
+            && let Some(speech_app) = weak_speech_app.upgrade()
         {
             let mut locked_speech_app = speech_app.lock();
             if locked_speech_app.finished_speech() {
-                // Save:
+                // Save
                 let _ = locked_speech_app.save_audio();
 
-                // Notify:
+                // Notify
                 if let Some(weak_cv_finished) = self.weak_cv_finished.as_ref()
-                    && let Some(cv_finished) = Weak::upgrade(weak_cv_finished)
+                    && let Some(cv_finished) = weak_cv_finished.upgrade()
                 {
                     cv_finished.notify_all();
                 }
             } else {
-                // Throttle speak calls:
+                // Throttle speak calls
                 std::thread::sleep(std::time::Duration::from_millis(500));
-                // Continue reading:
+                // Continue reading
                 let _ = locked_speech_app.speak_chunked();
             }
         }
@@ -334,17 +334,21 @@ struct SpeechApp {
     toast_manager: winrt_toast::ToastManager,
     chunked_speech: String,
 
-    // For SapiEventHandler:
+    // For ClipboardListener
+    cbm_shutdown: Option<clipboard_master::Shutdown>,
+    cbm_join_handle: Option<std::thread::JoinHandle<()>>,
+
+    // For SapiEventHandler
     weak_speech_app: Option<Weak<Mutex<SpeechApp>>>,
     weak_cv_finished: Option<Weak<Condvar>>,
 
-    // Windows:
+    // Windows
     weak_about_window: Option<slint::Weak<AboutWindow>>,
     weak_dictionary_window: Option<slint::Weak<DictionaryWindow>>,
 }
 
 impl SpeechApp {
-    fn build(config: Config, dictionary: Dictionary) -> Result<Self, Box<dyn Error>> {
+    fn try_new(config: Config, dictionary: Dictionary) -> Result<Self, Box<dyn Error>> {
         sapi_lite::initialize()?;
 
         let mut speech_app = Self {
@@ -355,6 +359,9 @@ impl SpeechApp {
             dictionary,
             toast_manager: winrt_toast::ToastManager::new(APP_ID),
             chunked_speech: String::new(),
+
+            cbm_shutdown: None,
+            cbm_join_handle: None,
 
             weak_speech_app: None,
             weak_cv_finished: None,
@@ -499,6 +506,7 @@ impl SpeechApp {
             return Ok(());
         }
 
+        // Get the generated speech buffer
         let stream = windows::Win32::System::Com::IStream::from(self.memory_stream.try_clone()?);
 
         let mut data: Vec<u8> = Vec::with_capacity(0x1000);
@@ -528,12 +536,13 @@ impl SpeechApp {
         }
 
         unsafe {
-            stream.SetSize(0)?; // Done with this stream.
+            stream.SetSize(0)?; // Done with this stream
         }
         if samples.is_empty() {
             return Ok(());
         }
 
+        // Save the audio file
         let sample_rate = if self.config.hq_audio { 48000 } else { 16000 };
         let mut notif = String::from("");
         match self.config.output {
@@ -581,6 +590,7 @@ impl SpeechApp {
             _ => (),
         }
 
+        // Windows toast notification
         if !notif.is_empty() {
             if self.config.hq_audio {
                 notif += " (HQ)";
@@ -610,6 +620,14 @@ impl SpeechApp {
 
 impl Drop for SpeechApp {
     fn drop(&mut self) {
+        // Stop clipboard_master thread
+        if let Some(cbm_shutdown) = self.cbm_shutdown.take() {
+            cbm_shutdown.signal();
+            if let Some(cbm_join_handle) = self.cbm_join_handle.take() {
+                let _ = cbm_join_handle.join();
+            }
+        }
+
         sapi_lite::finalize();
     }
 }
@@ -621,25 +639,35 @@ struct ClipboardListener {
 
 impl ClipboardListener {
     fn spawn(weak_speech_app: Weak<Mutex<SpeechApp>>) {
-        std::thread::spawn(move || {
+        let speech_app = weak_speech_app.upgrade();
+        let join_handle = std::thread::spawn(move || {
             let Ok(clipboard) = arboard::Clipboard::new() else {
                 return;
             };
 
-            let listener = ClipboardListener {
+            let listener = Self {
                 clipboard,
-                weak_speech_app,
+                weak_speech_app: Weak::clone(&weak_speech_app),
             };
 
-            let _ = clipboard_master::Master::new(listener).run();
+            let Ok(mut master) = clipboard_master::Master::new(listener) else {
+                return;
+            };
+            if let Some(speech_app) = weak_speech_app.upgrade() {
+                speech_app.lock().cbm_shutdown = Some(master.shutdown_channel());
+            }
+            let _ = master.run();
         });
+        if let Some(speech_app) = speech_app {
+            speech_app.lock().cbm_join_handle = Some(join_handle);
+        }
     }
 }
 
 impl clipboard_master::ClipboardHandler for ClipboardListener {
     fn on_clipboard_change(&mut self) -> clipboard_master::CallbackResult {
         if let Ok(text) = self.clipboard.get_text()
-            && let Some(speech_app) = Weak::upgrade(&self.weak_speech_app)
+            && let Some(speech_app) = self.weak_speech_app.upgrade()
         {
             let _ = speech_app.lock().speak(&text);
         }
@@ -652,6 +680,7 @@ impl clipboard_master::ClipboardHandler for ClipboardListener {
 }
 
 pub fn run(hidden: Option<bool>, chunked: Option<bool>) -> Result<(), Box<dyn Error>> {
+    // Load and update config
     let mut config;
     {
         let original_config = Config::load(false);
@@ -665,13 +694,14 @@ pub fn run(hidden: Option<bool>, chunked: Option<bool>) -> Result<(), Box<dyn Er
         }
     }
 
-    let dictionary = Dictionary::build()?;
+    let dictionary = Dictionary::try_new()?;
 
-    let speech_app = Arc::new(Mutex::new(SpeechApp::build(config, dictionary)?));
+    let speech_app = Arc::new(Mutex::new(SpeechApp::try_new(config, dictionary)?));
     speech_app.lock().weak_speech_app = Some(Arc::downgrade(&speech_app));
 
     ClipboardListener::spawn(Arc::downgrade(&speech_app));
 
+    // Update window title
     let main_window = MainWindow::new()?;
     if speech_app.lock().config.chunked {
         main_window.set_app_name(slint::SharedString::from(APP_NAME) + " [CHUNKED]");
@@ -679,6 +709,7 @@ pub fn run(hidden: Option<bool>, chunked: Option<bool>) -> Result<(), Box<dyn Er
         main_window.set_app_name(slint::SharedString::from(APP_NAME));
     }
 
+    // Create tray icon
     let _tray_icon;
     {
         let weak_main_window = main_window.as_weak();
@@ -686,8 +717,7 @@ pub fn run(hidden: Option<bool>, chunked: Option<bool>) -> Result<(), Box<dyn Er
         _tray_icon = tray_icon::TrayIconBuilder::new()
             .with_tooltip(APP_NAME)
             .with_icon(icon)
-            .build()
-            .unwrap();
+            .build()?;
         tray_icon::TrayIconEvent::set_event_handler(Some(move |event| {
             if let tray_icon::TrayIconEvent::Click {
                 button: tray_icon::MouseButton::Left,
@@ -716,6 +746,7 @@ pub fn run(hidden: Option<bool>, chunked: Option<bool>) -> Result<(), Box<dyn Er
         }));
     }
 
+    // Update the list of voices and select a voice
     {
         let v: Vec<slint::StandardListViewItem> = speech_app
             .lock()
@@ -730,15 +761,18 @@ pub fn run(hidden: Option<bool>, chunked: Option<bool>) -> Result<(), Box<dyn Er
         main_window.invoke_voices_list_set_current_item(index as i32);
     }
 
+    // Update other UI elements
     main_window.set_rate(speech_app.lock().config.rate as f32);
     main_window.set_volume(speech_app.lock().config.volume as f32);
     main_window.set_output_cb_current_index(speech_app.lock().config.output as i32);
 
+    // Special handling of the close event because the run_event_loop_until_quit will be used
     main_window.window().on_close_requested(|| {
         slint::quit_event_loop().unwrap();
         slint::CloseRequestResponse::HideWindow
     });
 
+    // Window events
     main_window.on_voices_list_current_item_changed({
         let speech_app = Arc::clone(&speech_app);
         move |index: i32| {
@@ -901,6 +935,7 @@ pub fn run(hidden: Option<bool>, chunked: Option<bool>) -> Result<(), Box<dyn Er
         }
     });
 
+    // Run the event loop
     center_window(main_window.as_weak(), !speech_app.lock().config.hidden);
     slint::run_event_loop_until_quit()?;
     main_window.hide()?;
@@ -909,24 +944,25 @@ pub fn run(hidden: Option<bool>, chunked: Option<bool>) -> Result<(), Box<dyn Er
 }
 
 pub fn run_simple(text: Option<String>, path: Option<String>) -> Result<(), Box<dyn Error>> {
+    // Get the text to be read
     let final_text = match (text, path) {
         (Some(t), _) => t,
         (None, Some(p)) => std::fs::read_to_string(p)?,
         _ => String::new(),
     };
-
     if final_text.is_empty() {
         return Ok(());
     }
 
     let config = Config::load(true);
-    let dictionary = Dictionary::build()?;
+    let dictionary = Dictionary::try_new()?;
 
-    let speech_app = Arc::new(Mutex::new(SpeechApp::build(config, dictionary)?));
+    let speech_app = Arc::new(Mutex::new(SpeechApp::try_new(config, dictionary)?));
     let cv_finished = Arc::new(Condvar::new());
     speech_app.lock().weak_speech_app = Some(Arc::downgrade(&speech_app));
     speech_app.lock().weak_cv_finished = Some(Arc::downgrade(&cv_finished));
 
+    // Speak and wait until the speech is finished
     {
         let mut locked_speech_app = speech_app.lock();
         locked_speech_app.speak(&final_text)?;
