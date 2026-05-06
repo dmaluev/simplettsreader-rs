@@ -13,6 +13,7 @@ export component DictionaryWindow inherits Window {
     background: Palette.alternate-background;
     icon: @image-url("../assets/app_icon.ico");
     title: "Dictionary";
+
     in property <[StandardListViewItem]> word-list-model;
     out property <string> old-word-string;
     out property <string> new-word-string;
@@ -25,6 +26,7 @@ export component DictionaryWindow inherits Window {
             return "";
         }
     }
+
     VerticalBox {
         LineEdit {
             placeholder-text: "Old word";
@@ -38,6 +40,7 @@ export component DictionaryWindow inherits Window {
 
         HorizontalBox {
             padding: 0px;
+
             add-button := Button {
                 text: "Add";
             }

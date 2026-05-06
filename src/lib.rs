@@ -806,7 +806,7 @@ pub fn run(hidden: Option<bool>, chunked: Option<bool>) -> Result<(), Box<dyn Er
             about_window.set_hidden(speech_app.lock().config.hidden);
             about_window.set_hq_audio(speech_app.lock().config.hq_audio);
 
-            about_window.on_hidden_cb_toggled({
+            about_window.on_hidden_switch_toggled({
                 let weak_about_window = about_window.as_weak();
                 let speech_app = Arc::clone(&speech_app);
                 move || {
@@ -815,7 +815,7 @@ pub fn run(hidden: Option<bool>, chunked: Option<bool>) -> Result<(), Box<dyn Er
                     speech_app.lock().config.store();
                 }
             });
-            about_window.on_hq_audio_cb_toggled({
+            about_window.on_hq_audio_switch_toggled({
                 let weak_about_window = about_window.as_weak();
                 let speech_app = Arc::clone(&speech_app);
                 move || {

@@ -1,0 +1,26 @@
+import { Palette, Button } from "std-widgets.slint";
+
+export component MyButton inherits Button {
+    width: 102px;
+}
+
+export component MyOpenButton inherits Button {
+    width: 34px;
+    text: "...";
+}
+
+export component MyLine inherits Rectangle {
+    height: 1phx;
+    background: Palette.border;
+}
+
+export component MySliderLabel inherits Text {
+    width: 64px;
+    vertical-alignment: center;
+}
+
+export component MySliderValue inherits Text {
+    width: 32px;
+    horizontal-alignment: center;
+    vertical-alignment: center;
+}

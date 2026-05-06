@@ -1,4 +1,10 @@
-﻿Simple TTS Reader v2.0.3
+﻿Simple TTS Reader v2.0.4
+------------------------
+* Pressing Enter in the test string box now reads the text aloud (same as clicking Test)
+* Latest library versions, minor improvements
+
+
+Simple TTS Reader v2.0.3
 ------------------------
 * New chunked mode (command-line: --chunked) can help bypass time limits of online TTS services
   by splitting large texts into smaller segments for creating long audio files

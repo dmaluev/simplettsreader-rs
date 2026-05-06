@@ -1,16 +1,18 @@
-import { VerticalBox, CheckBox, AboutSlint } from "std-widgets.slint";
+import { VerticalBox, Switch, AboutSlint } from "std-widgets.slint";
 
 export component AboutWindow inherits Window {
     width: 300px;
     height: 440px;
     icon: @image-url("../assets/app_icon.ico");
     title <=> app-name;
+
     in property <string> app-name;
     in property <string> app-version;
     in-out property <bool> hidden;
     in-out property <bool> hq-audio;
-    callback hidden-cb-toggled <=> hidden-cb.toggled;
-    callback hq-audio-cb-toggled <=> hq-audio-cb.toggled;
+    callback hidden-switch-toggled <=> hidden-switch.toggled;
+    callback hq-audio-switch-toggled <=> hq-audio-switch.toggled;
+
     VerticalBox {
         HorizontalLayout {
             Image {
@@ -21,10 +23,12 @@ export component AboutWindow inherits Window {
 
             VerticalBox {
                 padding-top: 0px;
+
                 HorizontalLayout {
                     alignment: start;
+
                     Text {
-                        font-weight: 800;
+                        font-weight: FontWeight.bold;
                         text <=> app-name;
                     }
 
@@ -44,12 +48,12 @@ export component AboutWindow inherits Window {
             wrap: word-wrap;
         }
 
-        hidden-cb := CheckBox {
+        hidden-switch := Switch {
             checked <=> hidden;
             text: "Launch hidden";
         }
 
-        hq-audio-cb := CheckBox {
+        hq-audio-switch := Switch {
             checked <=> hq-audio;
             text: "High Quality audio files";
         }

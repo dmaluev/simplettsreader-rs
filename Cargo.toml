@@ -14,7 +14,7 @@ strip = true
 arboard = "3.6.1"
 chrono = "0.4.44"
 clipboard-master = "4.0.0"
-confy = "1.0.0"
+confy = "2.0.0"
 hound = "3.5.1"
 log = "0.4.29"
 ogg-opus = "0.1.2"
@@ -26,7 +26,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 simplelog = "0.12.2"
 single-instance = "0.3.3"
 slint = { version = "1.16.1", features = ["image-default-formats", "unstable-winit-030"] }
-tray-icon = "0.23.1"
+tray-icon = "0.24.0"
 vorbis-encoder = "0.1.4"
 windows = "0.28"
 winrt-toast = "0.1.1"

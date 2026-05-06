@@ -1,14 +1,21 @@
 import {
     Palette,
+    StyleMetrics,
     GridBox,
     HorizontalBox,
     VerticalBox,
-    Button,
     ComboBox,
     LineEdit,
     Slider,
     StandardListView,
 } from "std-widgets.slint";
+import {
+    MyButton,
+    MyOpenButton,
+    MyLine,
+    MySliderLabel,
+    MySliderValue,
+} from "my_lib.slint";
 import { AboutWindow } from "about_window.slint";
 import { DictionaryWindow } from "dictionary_window.slint";
 
@@ -20,6 +27,7 @@ export component MainWindow inherits Window {
     background: Palette.alternate-background;
     icon: @image-url("../assets/app_icon.ico");
     title <=> app-name;
+
     in property <string> app-name;
     in property <[StandardListViewItem]> voices-list-model;
     out property <string> test-string: "This is a test string.";
@@ -38,6 +46,7 @@ export component MainWindow inherits Window {
     public function voices-list-set-current-item(index: int) {
         voices-list.set-current-item(index);
     }
+
     VerticalBox {
         Rectangle {
             background: Palette.control-background;
@@ -49,10 +58,10 @@ export component MainWindow inherits Window {
         }
 
         GridBox {
-            spacing-vertical: 24px;
+            spacing-vertical: StyleMetrics.layout-spacing * 2;
+
             Row {
-                Text {
-                    width: 64px;
+                MySliderLabel {
                     text: "Rate:";
                 }
 
@@ -69,16 +78,13 @@ export component MainWindow inherits Window {
                     }
                 }
 
-                Text {
-                    width: 32px;
-                    horizontal-alignment: center;
+                MySliderValue {
                     text: "\{round(rate-slider.value)}";
                 }
             }
 
             Row {
-                Text {
-                    width: 64px;
+                MySliderLabel {
                     text: "Volume:";
                 }
 
@@ -89,38 +95,33 @@ export component MainWindow inherits Window {
                     }
                 }
 
-                Text {
-                    width: 32px;
-                    horizontal-alignment: center;
+                MySliderValue {
                     text: "\{round(volume-slider.value)}";
                 }
             }
         }
 
         HorizontalBox {
-            about-button := Button {
-                width: 102px;
+            about-button := MyButton {
                 text: "About";
             }
 
-            test-button := Button {
-                width: 102px;
+            test-button := MyButton {
                 text: "Test";
             }
 
             LineEdit {
                 text <=> test-string;
+                accepted(text) => {
+                    test-button-clicked();
+                }
             }
         }
 
-        Rectangle {
-            height: 1phx;
-            background: Palette.border;
-        }
+        MyLine { }
 
         HorizontalBox {
-            dict-button := Button {
-                width: 102px;
+            dict-button := MyButton {
                 text: "Dictionary";
             }
 
@@ -128,20 +129,13 @@ export component MainWindow inherits Window {
                 model: ["Speak", "🔴 Save as WAV", "🔴 Save as Opus", "🔴 Save as Ogg Vorbis"];
             }
 
-            output-button := Button {
-                width: 34px;
-                text: "...";
-            }
-
-            Rectangle {
-                width: 0px;
-            }
+            output-button := MyOpenButton { }
 
             link-ta := TouchArea {
-                mouse-cursor: MouseCursor.pointer;
+                mouse-cursor: pointer;
                 Text {
-                    color: link-ta.has-hover ? Palette.foreground : #0078d7;
-                    font-weight: 800;
+                    color: link-ta.has-hover ? Palette.foreground : Palette.accent-background;
+                    font-weight: FontWeight.extra-bold;
                     text: "simplettsreader.sourceforge.io";
                     vertical-alignment: center;
                 }
